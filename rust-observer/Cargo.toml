@@ -1,0 +1,12 @@
+# ref: /home/mrg/Desktop/exfil-step-a-refs/snoop/Cargo.toml:1 (workspace split and default-members)
+[workspace]
+members = [
+    "snoop",
+    "snoop-common",
+    "snoop-ebpf",
+]
+default-members = ["snoop", "snoop-common"]
+resolver = "2"
+
+[profile.dev]
+opt-level = 1

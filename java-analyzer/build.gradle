@@ -1,0 +1,4 @@
+plugins {
+    // ref: https://docs.gradle.org/9.5.1/userguide/java_plugin.html (Java plugin id)
+    id 'java'
+}

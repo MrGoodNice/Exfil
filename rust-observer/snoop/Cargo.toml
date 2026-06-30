@@ -1,0 +1,13 @@
+# ref: /home/mrg/Desktop/exfil-step-a-refs/snoop/snoop/Cargo.toml:1 (userspace binary crate shape)
+[package]
+name = "snoop"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "snoop"
+path = "src/main.rs"
+
+[dependencies]
+snoop-common = { path = "../snoop-common" }

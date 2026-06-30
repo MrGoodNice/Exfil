@@ -1,0 +1,8 @@
+# ref: /home/mrg/Desktop/exfil-step-a-refs/snoop/snoop-common/Cargo.toml:1 (shared userspace/eBPF crate shape)
+[package]
+name = "snoop-common"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]

@@ -1,0 +1,13 @@
+# ref: /home/mrg/Desktop/exfil-step-a-refs/snoop/snoop-ebpf/Cargo.toml:1 (eBPF member kept outside default host build)
+[package]
+name = "snoop-ebpf"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "snoop-ebpf"
+path = "src/main.rs"
+
+[dependencies]
+snoop-common = { path = "../snoop-common" }
