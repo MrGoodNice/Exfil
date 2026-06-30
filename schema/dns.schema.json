@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "exfil-analyzer/schema/dns.schema.json",
+  "title": "dns event",
+  "description": "Один DNS-запрос из dns.jsonl (из honeynet DNS-sinkhole).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["ts", "run_id", "sample_id", "query", "qtype", "canary_match", "sinkholed"],
+  "properties": {
+    "ts": { "type": "string", "format": "date-time" },
+    "run_id": { "type": "string" },
+    "sample_id": { "type": "string" },
+    "query": { "type": "string", "description": "запрошенное имя" },
+    "qtype": { "type": "string", "description": "A | AAAA | TXT | CNAME | ..." },
+    "resolved_ip": { "type": ["string", "null"], "description": "что отдал sinkhole (подставной IP)" },
+    "canary_match": { "type": "array", "items": { "type": "string" }, "description": "id канареек, найденных в DNS label" },
+    "sinkholed": { "type": "boolean", "description": "перехвачен ли honeynet (в fail-closed всегда true)" },
+    "container_id": { "type": ["string", "null"] }
+  }
+}

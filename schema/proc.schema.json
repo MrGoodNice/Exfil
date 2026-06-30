@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "exfil-analyzer/schema/proc.schema.json",
+  "title": "process event",
+  "description": "Одно событие процесса из proc.jsonl (из aya execve/exit). ppid даёт дерево процессов для атрибуции exfil к нужному pid.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["ts", "run_id", "sample_id", "pid", "ppid", "tgid", "comm", "event"],
+  "properties": {
+    "ts": { "type": "string", "format": "date-time" },
+    "run_id": { "type": "string" },
+    "sample_id": { "type": "string" },
+    "pid": { "type": "integer" },
+    "ppid": { "type": "integer" },
+    "tgid": { "type": "integer" },
+    "comm": { "type": "string" },
+    "exe": { "type": ["string", "null"] },
+    "argv_hash": { "type": ["string", "null"] },
+    "event": { "enum": ["execve", "exit"] },
+    "container_id": { "type": ["string", "null"] },
+    "cgroup_id": { "type": ["string", "null"] }
+  }
+}

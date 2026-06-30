@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "exfil-analyzer/schema/manifest.schema.json",
+  "title": "static manifest",
+  "description": "Заявление Java-статики: что пакет, вероятно, будет читать, запускать или отправлять. Используется только как подсказка для отчёта.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["repo", "generated_at", "analyzer_version", "items"],
+  "properties": {
+    "repo": { "type": "string" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "analyzer_version": { "type": "string" },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "value", "evidence", "capability", "threat", "confidence", "suspicious"],
+        "properties": {
+          "type": { "type": "string", "description": "категория наблюдения, например url, secret_path, install_hook" },
+          "value": { "type": "string" },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["path"],
+              "properties": {
+                "path": { "type": "string" },
+                "line": { "type": ["integer", "null"], "minimum": 1 },
+                "snippet": { "type": ["string", "null"] },
+                "rule": { "type": ["string", "null"] }
+              }
+            }
+          },
+          "capability": { "type": ["string", "null"], "description": "capability taxonomy по guarddog-подходу" },
+          "threat": { "type": ["string", "null"], "description": "threat taxonomy по guarddog-подходу" },
+          "confidence": { "enum": ["low", "medium", "high"] },
+          "suspicious": { "type": "boolean" }
+        }
+      }
+    }
+  }
+}

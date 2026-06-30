@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "exfil-analyzer/schema/canary.schema.json",
+  "title": "canary catalog",
+  "description": "Per-run каталог fake-секретов. match_token — точная строка, которую honeynet и отчёт используют для матчинга и редактирования.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["run_id", "generated_at", "secrets"],
+  "properties": {
+    "run_id": { "type": "string" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "secrets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["secret_id", "type", "path", "match_token"],
+        "properties": {
+          "secret_id": { "type": "string" },
+          "type": { "type": "string", "description": "тип fake-секрета, например canary_rsa, aws_access_key, kubeconfig" },
+          "path": { "type": "string" },
+          "env_name": { "type": ["string", "null"] },
+          "match_token": { "type": "string" }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,31 @@
+# --- Java / Gradle ---
+.gradle/
+build/
+*.class
+
+# --- Rust / Cargo ---
+target/
+**/*.rs.bk
+
+# --- Секреты и канарейки (НИКОГДА не коммитим) ---
+canary_*
+*.pem
+ca.pem
+ca.crt
+*.key
+
+# --- Артефакты прогонов ---
+*.jsonl
+reports/
+run-*/
+
+# --- OS / IDE ---
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# секреты окружения
+.env
+.env.*
+*.token

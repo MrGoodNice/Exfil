@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "exfil-analyzer/schema/files.schema.json",
+  "title": "file event",
+  "description": "Одно событие доступа к файлу из files.jsonl (из aya openat). is_canary=true — тронут per-run fake-секрет.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["ts", "run_id", "sample_id", "pid", "comm", "path", "is_canary"],
+  "properties": {
+    "ts": { "type": "string", "format": "date-time" },
+    "run_id": { "type": "string" },
+    "sample_id": { "type": "string" },
+    "pid": { "type": "integer" },
+    "tgid": { "type": ["integer", "null"] },
+    "comm": { "type": "string", "description": "имя процесса (comm)" },
+    "path": { "type": "string" },
+    "is_canary": { "type": "boolean" },
+    "container_id": { "type": ["string", "null"] },
+    "cgroup_id": { "type": ["string", "null"] }
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "exfil-analyzer/schema/http.schema.json",
+  "title": "http event",
+  "description": "Один HTTP(S)-запрос из http.jsonl (из mitmproxy/honeynet). При pinning/QUIC/custom-TLS payload не виден → opaque_reason заполнен, canary_match пуст.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["ts", "run_id", "sample_id", "flow_id", "host", "tls", "canary_match", "upstream"],
+  "properties": {
+    "ts": { "type": "string", "format": "date-time" },
+    "run_id": { "type": "string" },
+    "sample_id": { "type": "string" },
+    "flow_id": { "type": ["string", "null"], "description": "id, назначенный honeynet для связи http↔network" },
+    "method": { "type": ["string", "null"], "description": "GET/POST/... null если handshake не дошёл до запроса" },
+    "host": { "type": "string" },
+    "path": { "type": ["string", "null"] },
+    "tls": { "type": "boolean" },
+    "opaque_reason": { "type": ["string", "null"], "enum": [null, "pinning", "quic", "custom-tls", "failed-handshake"], "description": "почему payload не виден; null = расшифрован" },
+    "canary_match": { "type": "array", "items": { "type": "string" }, "description": "id канареек, найденных в заголовках или теле запроса" },
+    "request_body_sha256": { "type": ["string", "null"] },
+    "response_body_sha256": { "type": ["string", "null"] },
+    "upstream": { "type": "boolean", "description": "ушло ли реально наружу; в honeynet всегда false" }
+  }
+}

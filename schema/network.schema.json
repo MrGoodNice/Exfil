@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "exfil-analyzer/schema/network.schema.json",
+  "title": "network event",
+  "description": "Одно сетевое (egress) событие из network.jsonl. source=honeynet — L7-видимость, pid может быть null; source=aya_connect — L4-видимость с pid (только metadata для атрибуции, не сигнал блока/taint).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["ts", "run_id", "sample_id", "source", "flow_id", "dst_ip", "dst_port", "proto"],
+  "properties": {
+    "ts": { "type": "string", "format": "date-time" },
+    "run_id": { "type": "string" },
+    "sample_id": { "type": "string" },
+    "source": { "enum": ["honeynet", "aya_connect"] },
+    "flow_id": { "type": ["string", "null"], "description": "id, назначенный honeynet для связи network↔http; у aya_connect пока null" },
+    "pid": { "type": ["integer", "null"] },
+    "src_ip": { "type": ["string", "null"] },
+    "src_port": { "type": ["integer", "null"] },
+    "dst_ip": { "type": "string", "description": "оригинальный dst (для aya — аргумент connect(); для honeynet — восстановленный через SO_ORIGINAL_DST)" },
+    "dst_port": { "type": "integer" },
+    "proto": { "enum": ["tcp", "udp", "other"] },
+    "retval": { "type": ["integer", "null"], "description": "результат connect() (метаданные, напр. ECONNREFUSED). НЕ используется как сигнал блока/taint." },
+    "container_id": { "type": ["string", "null"] },
+    "cgroup_id": { "type": ["string", "null"], "description": "строка, т.к. 64-бит id теряет точность как JSON number" }
+  }
+}
