@@ -69,6 +69,19 @@ assert_contains "$dry_run" "--cpus"
 assert_not_contains "$dry_run" "--network host"
 assert_not_contains "$dry_run" "seccomp=unconfined"
 
+# EXFIL_SANDBOX_USER must never resolve to root (uid 0 or gid 0), including
+# leading-zero ("00"/"000") and non-numeric/username bypasses.
+for bad_user in 0 00 000 0:0 00:00 1000:0 0:1000 root root:root nobody; do
+  if EXFIL_SANDBOX_USER="$bad_user" "$run_script" --dry-run example.local/target:latest true >/dev/null 2>&1; then
+    fail "EXFIL_SANDBOX_USER=$bad_user must be refused (root or non-numeric)"
+  fi
+done
+# Legit non-root values must still be accepted (regression guard).
+for ok_user in 65532:65532 1000:1000 1000; do
+  EXFIL_SANDBOX_USER="$ok_user" "$run_script" --dry-run example.local/target:latest true >/dev/null 2>&1 ||
+    fail "EXFIL_SANDBOX_USER=$ok_user must be accepted"
+done
+
 "$cleanup_script"
 "$cleanup_script"
 
