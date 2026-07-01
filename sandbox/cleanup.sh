@@ -10,3 +10,10 @@ mapfile -t containers < <(docker ps -aq --filter label=exfil-analyzer.managed=tr
 if [[ "${#containers[@]}" -gt 0 ]]; then
   docker rm -f "${containers[@]}" >/dev/null
 fi
+
+mapfile -t networks < <(docker network ls -q \
+  --filter label=exfil-analyzer.managed=true \
+  --filter label=exfil-analyzer.kind=honeynet-network 2>/dev/null || true)
+if [[ "${#networks[@]}" -gt 0 ]]; then
+  docker network rm "${networks[@]}" >/dev/null
+fi

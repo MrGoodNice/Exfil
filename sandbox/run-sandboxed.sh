@@ -3,7 +3,9 @@ set -euo pipefail
 
 usage() {
   cat >&2 <<'USAGE'
-Usage: sandbox/run-sandboxed.sh [--dry-run] [--name NAME] [--canary-dir DIR] IMAGE [COMMAND...]
+Usage: sandbox/run-sandboxed.sh [--dry-run] [--name NAME] [--canary-dir DIR]
+                                [--honeynet-network NAME --honeynet-dns IP]
+                                IMAGE [COMMAND...]
 
 Runs IMAGE with a hardened, fail-closed Docker profile for F0.2.
 The image must already exist locally; this script uses --pull never.
@@ -47,6 +49,8 @@ require_docker_runtime_baseline() {
 dry_run=0
 container_name="exfil-f0-2-$(date +%s)-$$"
 canary_dir=""
+honeynet_network=""
+honeynet_dns=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -62,6 +66,16 @@ while [[ $# -gt 0 ]]; do
     --canary-dir)
       [[ $# -ge 2 ]] || fail "--canary-dir requires a value"
       canary_dir="$2"
+      shift 2
+      ;;
+    --honeynet-network)
+      [[ $# -ge 2 ]] || fail "--honeynet-network requires a value"
+      honeynet_network="$2"
+      shift 2
+      ;;
+    --honeynet-dns)
+      [[ $# -ge 2 ]] || fail "--honeynet-dns requires a value"
+      honeynet_dns="$2"
       shift 2
       ;;
     --help|-h)
@@ -117,6 +131,24 @@ if [[ -n "$canary_dir" ]]; then
   canary_dir="$(cd "$canary_dir" && pwd -P)"
 fi
 
+if [[ -n "$honeynet_network" || -n "$honeynet_dns" ]]; then
+  [[ -n "$honeynet_network" ]] || fail "--honeynet-dns requires --honeynet-network"
+  [[ -n "$honeynet_dns" ]] || fail "--honeynet-network requires --honeynet-dns"
+  case "$honeynet_network" in
+    host|bridge|none)
+      fail "refusing Docker builtin network for honeynet mode: $honeynet_network"
+      ;;
+  esac
+fi
+
+network_args=(--network none)
+container_phase="F0.2"
+if [[ -n "$honeynet_network" ]]; then
+  # ref: docker run --help on Docker 29.6.0: --network connects to a named network; --dns sets container resolvers.
+  network_args=(--network "$honeynet_network" --dns "$honeynet_dns")
+  container_phase="F1.0"
+fi
+
 docker_args=(
   # ref: /home/mrg/Desktop/exfil-step-a-refs/package-analysis/internal/sandbox/sandbox.go:295 (create container before run lifecycle)
   run
@@ -124,9 +156,8 @@ docker_args=(
   --pull never
   --name "$container_name"
   --label exfil-analyzer.managed=true
-  --label exfil-analyzer.phase=F0.2
-  # ref: /home/mrg/Desktop/exfil-step-a-refs/package-analysis/internal/sandbox/sandbox.go:309 (offline network=none)
-  --network none
+  --label "exfil-analyzer.phase=${container_phase}"
+  "${network_args[@]}"
   # ref: docker run --help on Docker 29.6.0: --cap-drop, --security-opt, --read-only, --tmpfs, --user, --pids-limit, --memory, --cpus
   --cap-drop ALL
   --security-opt no-new-privileges
