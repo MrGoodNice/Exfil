@@ -13,7 +13,7 @@ http_test="$http_dir/main_test.go"
 ref_ledger="$honeynet_dir/REF_LEDGER.md"
 
 fail() {
-  echo "F1.1 gate failed: $*" >&2
+  echo "F1.2a gate failed: $*" >&2
   exit 1
 }
 
@@ -23,6 +23,12 @@ assert_file() {
 
 assert_executable() {
   [[ -x "$1" ]] || fail "not executable: $1"
+}
+
+assert_contains() {
+  local haystack="$1"
+  local needle="$2"
+  [[ "$haystack" == *"$needle"* ]] || fail "missing content: $needle"
 }
 
 assert_contains_file() {
@@ -48,20 +54,46 @@ assert_executable "$start_script"
 assert_file "$dns_dir/main.go"
 assert_file "$http_main"
 assert_file "$http_test"
-assert_file "$http_dir/Dockerfile"
 assert_file "$ref_ledger"
 
-assert_contains_file "$ref_ledger" "flare-fakenet-ng/fakenet/listeners/HTTPListener.py:63"
-assert_contains_file "$ref_ledger" "flare-fakenet-ng/fakenet/listeners/HTTPListener.py:288"
-assert_contains_file "$http_main" "HTTPListener.py:63"
-assert_contains_file "$http_main" "upstream"
-assert_contains_file "$http_main" "flow_id"
-assert_contains_file "$http_main" "tls"
-assert_contains_file "$start_script" "EXFIL_HONEYNET_HTTP_IP"
-assert_contains_file "$start_script" "EXFIL_HONEYNET_HTTP_LOG"
-assert_contains_file "$start_script" 'EXFIL_DNS_RESPONSE_IP=$response_ip'
+assert_contains_file "$ref_ledger" "mitmproxy/mitmproxy/certs.py:232"
+assert_contains_file "$ref_ledger" "mitmproxy/mitmproxy/certs.py:314"
+assert_contains_file "$ref_ledger" "crypto/tls Config.GetCertificate"
+assert_contains_file "$http_main" "GetCertificate"
+assert_contains_file "$http_main" "CreateCertificate"
+assert_contains_file "$http_main" "EXFIL_TLS_CA_CERT"
+assert_contains_file "$http_main" "TLS:                tlsTerminated"
+assert_contains_file "$http_main" "CanaryMatch:        []string{}"
+assert_contains_file "$start_script" "EXFIL_HONEYNET_CA_CERT"
+assert_contains_file "$start_script" "EXFIL_TLS_CA_CERT"
+assert_contains_file "$run_sandboxed" "--ca-cert"
+assert_contains_file "$run_sandboxed" "SSL_CERT_FILE"
+assert_contains_file "$run_sandboxed" "NODE_EXTRA_CA_CERTS"
+assert_contains_file "$run_sandboxed" "REQUESTS_CA_BUNDLE"
+assert_contains_file "$run_sandboxed" "CURL_CA_BUNDLE"
 assert_not_contains_file "$start_script" "--publish"
 assert_not_contains_file "$start_script" "-p "
+
+tmpdir="$(mktemp -d)"
+trap '"$cleanup_script"; rm -rf "$tmpdir"' EXIT
+printf '%s\n' '-----BEGIN CERTIFICATE-----' 'test' '-----END CERTIFICATE-----' >"$tmpdir/ca.pem"
+ca_dry_run="$("$run_sandboxed" \
+  --dry-run \
+  --ca-cert "$tmpdir/ca.pem" \
+  --honeynet-network exfil-honeynet-test \
+  --honeynet-dns 172.30.0.2 \
+  example.local/target:latest true)"
+assert_contains "$ca_dry_run" "--mount"
+assert_contains "$ca_dry_run" "src=$tmpdir/ca.pem"
+assert_contains "$ca_dry_run" "dst=/tmp/exfil-analyzer-ca.pem"
+assert_contains "$ca_dry_run" "dst=/etc/ssl/certs/exfil-analyzer-ca.pem"
+assert_contains "$ca_dry_run" "readonly"
+assert_contains "$ca_dry_run" "SSL_CERT_FILE=/tmp/exfil-analyzer-ca.pem"
+assert_contains "$ca_dry_run" "SSL_CERT_DIR=/etc/ssl/certs"
+assert_contains "$ca_dry_run" "NODE_EXTRA_CA_CERTS=/tmp/exfil-analyzer-ca.pem"
+assert_contains "$ca_dry_run" "REQUESTS_CA_BUNDLE=/tmp/exfil-analyzer-ca.pem"
+assert_contains "$ca_dry_run" "CURL_CA_BUNDLE=/tmp/exfil-analyzer-ca.pem"
+[[ "$ca_dry_run" != *"PRIVATE KEY"* ]] || fail "dry-run leaked private key material"
 
 (cd "$dns_dir" && go test ./...)
 (cd "$http_dir" && go test ./...)
@@ -71,34 +103,33 @@ assert_not_contains_file "$start_script" "-p "
 
 if [[ "${EXFIL_RUN_DOCKER_TESTS:-0}" == "1" ]]; then
   image="${EXFIL_SANDBOX_TEST_IMAGE:-busybox:latest}"
-  tmpdir="$(mktemp -d)"
-  trap '"$cleanup_script"; rm -rf "$tmpdir"' EXIT
-
   env_file="$tmpdir/honeynet.env"
   "$start_script" \
     --build \
-    --run-id f1-1-run \
-    --sample-id f1-1-sample \
+    --run-id f1-2a-run \
+    --sample-id f1-2a-sample \
     --log-dir "$tmpdir/logs" \
     --env-file "$env_file" >/dev/null
 
   # shellcheck disable=SC1090
   source "$env_file"
 
-  get_log="$tmpdir/get.log"
-  post_log="$tmpdir/post.log"
-  "$run_sandboxed" \
-    --honeynet-network "$EXFIL_HONEYNET_NETWORK" \
-    --honeynet-dns "$EXFIL_HONEYNET_DNS_IP" \
-    "$image" wget -T 3 -O- "http://f1-1.example.test/download?x=1" >"$get_log" 2>&1
-  "$run_sandboxed" \
-    --honeynet-network "$EXFIL_HONEYNET_NETWORK" \
-    --honeynet-dns "$EXFIL_HONEYNET_DNS_IP" \
-    "$image" wget -T 3 -O- --post-data "payload=f1-1" "http://f1-1.example.test/submit" >"$post_log" 2>&1
+  [[ -s "$EXFIL_HONEYNET_CA_CERT" ]] || fail "missing CA certificate"
+  assert_contains_file "$EXFIL_HONEYNET_CA_CERT" "BEGIN CERTIFICATE"
+  if grep -R -I "PRIVATE KEY" "$tmpdir" >/dev/null; then
+    fail "CA private key leaked into honeynet artifacts"
+  fi
 
-  assert_contains_file "$get_log" "exfil-analyzer synthetic response"
-  assert_contains_file "$post_log" "exfil-analyzer synthetic response"
-  [[ -s "$EXFIL_HONEYNET_HTTP_LOG" ]] || fail "http.jsonl was not written"
+  https_log="$tmpdir/https-post.log"
+  "$run_sandboxed" \
+    --ca-cert "$EXFIL_HONEYNET_CA_CERT" \
+    --honeynet-network "$EXFIL_HONEYNET_NETWORK" \
+    --honeynet-dns "$EXFIL_HONEYNET_DNS_IP" \
+    "$image" wget -T 5 -O- --post-data "payload=f1-2a" "https://f1-2a.example.test/submit" >"$https_log" 2>&1
+  assert_contains_file "$https_log" "exfil-analyzer synthetic response"
+  if grep -R -I "PRIVATE KEY" "$tmpdir" >/dev/null; then
+    fail "CA private key leaked after target HTTPS run"
+  fi
 
   "${PYTHON:-python3}" - "$repo_root/schema/http.schema.json" "$EXFIL_HONEYNET_HTTP_LOG" <<'PY'
 import json
@@ -116,35 +147,31 @@ events = [
     for line in Path(sys.argv[2]).read_text(encoding="utf-8").splitlines()
     if line.strip()
 ]
-if len(events) < 2:
-    raise SystemExit(f"expected at least two HTTP events, got {events!r}")
+if not events:
+    raise SystemExit("no HTTP events")
 validator = Draft202012Validator(schema, format_checker=Draft202012Validator.FORMAT_CHECKER)
 for event in events:
     validator.validate(event)
+
+matches = [
+    event for event in events
+    if event["method"] == "POST"
+    and event["host"].split(":", 1)[0] == "f1-2a.example.test"
+    and event["path"] == "/submit"
+]
+if not matches:
+    raise SystemExit(f"TLS POST event missing: {events!r}")
+for event in matches:
+    if event["tls"] is not True:
+        raise SystemExit(f"tls must be true: {event!r}")
+    if event["upstream"] is not False or event["opaque_reason"] is not None:
+        raise SystemExit(f"bad TLS honeynet flags: {event!r}")
     if not event["flow_id"]:
         raise SystemExit(f"missing flow_id: {event!r}")
-    if event["tls"] is not False or event["upstream"] is not False:
-        raise SystemExit(f"bad network flags: {event!r}")
-    if event["opaque_reason"] is not None:
-        raise SystemExit(f"opaque_reason must be null for F1.1 HTTP: {event!r}")
     if event["canary_match"] != []:
-        raise SystemExit(f"canary_match must be empty in F1.1: {event!r}")
-
-def has_event(method, path):
-    return any(
-        event["method"] == method
-        and event["host"].split(":", 1)[0] == "f1-1.example.test"
-        and event["path"] == path
-        for event in events
-    )
-
-if not has_event("GET", "/download?x=1"):
-    raise SystemExit(f"GET event missing: {events!r}")
-if not has_event("POST", "/submit"):
-    raise SystemExit(f"POST event missing: {events!r}")
-post_events = [event for event in events if event["method"] == "POST"]
-if not any(event["request_body_sha256"] and len(event["request_body_sha256"]) == 64 for event in post_events):
-    raise SystemExit(f"POST request_body_sha256 missing: {post_events!r}")
+        raise SystemExit(f"canary_match must stay empty in F1.2a: {event!r}")
+    if not event["request_body_sha256"] or len(event["request_body_sha256"]) != 64:
+        raise SystemExit(f"missing request_body_sha256: {event!r}")
 PY
 
   "${PYTHON:-python3}" - "$repo_root/schema/dns.schema.json" "$EXFIL_HONEYNET_DNS_LOG" "$EXFIL_HONEYNET_HTTP_IP" <<'PY'
@@ -168,16 +195,17 @@ validator = Draft202012Validator(schema, format_checker=Draft202012Validator.FOR
 for event in events:
     validator.validate(event)
 if not any(
-    event["query"].rstrip(".") == "f1-1.example.test"
+    event["query"].rstrip(".") == "f1-2a.example.test"
     and event["qtype"] == "A"
     and event["resolved_ip"] == expected_ip
     for event in events
 ):
-    raise SystemExit(f"DNS did not resolve target domain to HTTP listener {expected_ip}: {events!r}")
+    raise SystemExit(f"DNS did not resolve TLS target to listener {expected_ip}: {events!r}")
 PY
 
   set +e
   "$run_sandboxed" \
+    --ca-cert "$EXFIL_HONEYNET_CA_CERT" \
     --honeynet-network "$EXFIL_HONEYNET_NETWORK" \
     --honeynet-dns "$EXFIL_HONEYNET_DNS_IP" \
     "$image" wget -T 3 -O- http://1.1.1.1/ >/dev/null 2>&1
@@ -192,6 +220,7 @@ PY
   if [[ -n "$tailscale_probe_ip" ]]; then
     set +e
     "$run_sandboxed" \
+      --ca-cert "$EXFIL_HONEYNET_CA_CERT" \
       --honeynet-network "$EXFIL_HONEYNET_NETWORK" \
       --honeynet-dns "$EXFIL_HONEYNET_DNS_IP" \
       "$image" wget -T 3 -O- "http://$tailscale_probe_ip/" >/dev/null 2>&1

@@ -4,6 +4,7 @@ set -euo pipefail
 usage() {
   cat >&2 <<'USAGE'
 Usage: sandbox/run-sandboxed.sh [--dry-run] [--name NAME] [--canary-dir DIR]
+                                [--ca-cert FILE]
                                 [--honeynet-network NAME --honeynet-dns IP]
                                 IMAGE [COMMAND...]
 
@@ -49,6 +50,7 @@ require_docker_runtime_baseline() {
 dry_run=0
 container_name="exfil-f0-2-$(date +%s)-$$"
 canary_dir=""
+ca_cert=""
 honeynet_network=""
 honeynet_dns=""
 
@@ -66,6 +68,11 @@ while [[ $# -gt 0 ]]; do
     --canary-dir)
       [[ $# -ge 2 ]] || fail "--canary-dir requires a value"
       canary_dir="$2"
+      shift 2
+      ;;
+    --ca-cert)
+      [[ $# -ge 2 ]] || fail "--ca-cert requires a value"
+      ca_cert="$2"
       shift 2
       ;;
     --honeynet-network)
@@ -131,6 +138,11 @@ if [[ -n "$canary_dir" ]]; then
   canary_dir="$(cd "$canary_dir" && pwd -P)"
 fi
 
+if [[ -n "$ca_cert" ]]; then
+  [[ -f "$ca_cert" ]] || fail "--ca-cert must be an existing file: $ca_cert"
+  ca_cert="$(cd "$(dirname "$ca_cert")" && pwd -P)/$(basename "$ca_cert")"
+fi
+
 if [[ -n "$honeynet_network" || -n "$honeynet_dns" ]]; then
   [[ -n "$honeynet_network" ]] || fail "--honeynet-dns requires --honeynet-network"
   [[ -n "$honeynet_dns" ]] || fail "--honeynet-network requires --honeynet-dns"
@@ -173,6 +185,21 @@ docker_args=(
 if [[ -n "$canary_dir" ]]; then
   # ref: docker run --help on Docker 29.6.0: --mount mount attaches a filesystem mount.
   docker_args+=(--mount "type=bind,src=${canary_dir},dst=/canary,readonly")
+fi
+
+if [[ -n "$ca_cert" ]]; then
+  # ref: crypto/x509 SystemCertPool docs on Go 1.26: SSL_CERT_FILE/SSL_CERT_DIR override Unix roots.
+  docker_args+=(
+    --tmpfs /etc/ssl/certs:rw,nosuid,nodev,size=1m
+    --mount "type=bind,src=${ca_cert},dst=/tmp/exfil-analyzer-ca.pem,readonly"
+    --mount "type=bind,src=${ca_cert},dst=/etc/ssl/certs/exfil-analyzer-ca.pem,readonly"
+    --env SSL_CERT_FILE=/tmp/exfil-analyzer-ca.pem
+    --env SSL_CERT_DIR=/etc/ssl/certs
+    --env NODE_EXTRA_CA_CERTS=/tmp/exfil-analyzer-ca.pem
+    --env REQUESTS_CA_BUNDLE=/tmp/exfil-analyzer-ca.pem
+    --env CURL_CA_BUNDLE=/tmp/exfil-analyzer-ca.pem
+    --env GIT_SSL_CAINFO=/tmp/exfil-analyzer-ca.pem
+  )
 fi
 
 if [[ -n "$userns_mode" ]]; then

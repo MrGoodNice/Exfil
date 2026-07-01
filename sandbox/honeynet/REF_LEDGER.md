@@ -21,6 +21,21 @@
   logs GET requests, and
   `/home/mrg/Desktop/exfil-step-a-refs/flare-fakenet-ng/fakenet/listeners/HTTPListener.py:337`
   reads POST bodies before responding.
+- mitmproxy CA generation pattern:
+  `/home/mrg/Desktop/exfil-step-a-refs/mitmproxy/mitmproxy/certs.py:232`
+  generates a CA private key and CA certificate, and
+  `/home/mrg/Desktop/exfil-step-a-refs/mitmproxy/mitmproxy/certs.py:314`
+  mints leaf certificates for requested SAN/common-name values.
+- mitmproxy certificate cache pattern:
+  `/home/mrg/Desktop/exfil-step-a-refs/mitmproxy/mitmproxy/certs.py:681`
+  fetches or creates a matching certificate for a connection.
+- mitmproxy original-destination note:
+  `/home/mrg/Desktop/exfil-step-a-refs/mitmproxy/mitmproxy/platform/linux.py:9`
+  recovers `SO_ORIGINAL_DST` for transparent redirects. F1.2a does not use
+  this because DNS routes targets directly to the honeynet listener IP.
+- Go TLS API checked locally:
+  `go doc crypto/tls Config.GetCertificate`, `go doc crypto/x509 CreateCertificate`,
+  `go doc net/http Server.ListenAndServeTLS`, and `go doc crypto/x509 SystemCertPool`.
 - Docker F1 network pattern:
   `docker network create --help` on local Docker 29.6.0 confirms `--internal`
   and `--label`; `docker run --help` confirms `--network` and `--dns`.

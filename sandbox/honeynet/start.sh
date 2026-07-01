@@ -138,6 +138,9 @@ require_name "network name" "$network_name"
 install -d -m 700 "$log_dir"
 log_dir="$(cd "$log_dir" && pwd -P)"
 dns_log="$log_dir/dns.jsonl"
+ca_dir="$log_dir/ca"
+install -d -m 700 "$ca_dir"
+ca_cert="$ca_dir/exfil-analyzer-ca.pem"
 
 honeynet_user="${EXFIL_HONEYNET_USER:-$(id -u):$(id -g)}"
 [[ "$honeynet_user" =~ ^[0-9]+:[0-9]+$ ]] || fail "EXFIL_HONEYNET_USER must be numeric UID:GID"
@@ -180,14 +183,24 @@ docker run -d \
   --memory 128m \
   --cpus 0.25 \
   --mount "type=bind,src=${log_dir},dst=/logs" \
+  --mount "type=bind,src=${ca_dir},dst=/ca" \
   --env "EXFIL_RUN_ID=$run_id" \
   --env "EXFIL_SAMPLE_ID=$sample_id" \
   --env "EXFIL_HTTP_LOG=/logs/http.jsonl" \
+  --env "EXFIL_TLS_CA_CERT=/ca/exfil-analyzer-ca.pem" \
   "$http_image" >/dev/null
 
 sleep 0.3
 http_ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$http_container")"
 [[ -n "$http_ip" ]] || fail "could not inspect HTTP container IP"
+for _ in {1..50}; do
+  [[ -s "$ca_cert" ]] && break
+  sleep 0.1
+done
+[[ -s "$ca_cert" ]] || fail "TLS listener did not publish a CA certificate"
+if grep -F "PRIVATE KEY" "$ca_cert" >/dev/null; then
+  fail "CA certificate file contains private key material"
+fi
 
 if [[ -z "$response_ip" ]]; then
   response_ip="$http_ip"
@@ -230,5 +243,6 @@ dns_ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{
   quote_env EXFIL_HONEYNET_HTTP_IP "$http_ip"
   quote_env EXFIL_HONEYNET_HTTP_CONTAINER "$http_container"
   quote_env EXFIL_HONEYNET_HTTP_LOG "$http_log"
+  quote_env EXFIL_HONEYNET_CA_CERT "$ca_cert"
   quote_env EXFIL_HONEYNET_RESPONSE_IP "$response_ip"
 } >"${env_file:-/dev/stdout}"
