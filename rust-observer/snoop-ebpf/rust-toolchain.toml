@@ -1,0 +1,5 @@
+# ref: /home/mrg/Desktop/exfil-step-a-refs/snoop/snoop-ebpf/rust-toolchain.toml:1
+[toolchain]
+channel = "nightly"
+components = ["rust-src"]
+targets = ["bpfel-unknown-none", "bpfeb-unknown-none"]
