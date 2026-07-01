@@ -19,6 +19,7 @@ Options:
   --dns-image IMAGE    DNS sinkhole image, default exfil-honeynet-dns:local.
   --http-image IMAGE   HTTP listener image, default exfil-honeynet-http:local.
   --response-ip IP     Override IPv4 returned for A records; default HTTP listener IP.
+  --canary-catalog FILE  Optional canary.json mounted read-only into the HTTP listener.
   --env-file FILE      Write source-able EXFIL_HONEYNET_* values to FILE.
   --build              Build the honeynet listener images before starting.
 USAGE
@@ -61,6 +62,7 @@ http_image="exfil-honeynet-http:local"
 response_ip=""
 log_dir=""
 env_file=""
+canary_catalog=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -103,6 +105,11 @@ while [[ $# -gt 0 ]]; do
       response_ip="$2"
       shift 2
       ;;
+    --canary-catalog)
+      [[ $# -ge 2 ]] || fail "--canary-catalog requires a value"
+      canary_catalog="$2"
+      shift 2
+      ;;
     --log-dir)
       [[ $# -ge 2 ]] || fail "--log-dir requires a value"
       log_dir="$2"
@@ -141,6 +148,15 @@ dns_log="$log_dir/dns.jsonl"
 ca_dir="$log_dir/ca"
 install -d -m 700 "$ca_dir"
 ca_cert="$ca_dir/exfil-analyzer-ca.pem"
+canary_mount_args=()
+if [[ -n "$canary_catalog" ]]; then
+  [[ -f "$canary_catalog" ]] || fail "--canary-catalog must point to a regular file"
+  canary_catalog="$(cd "$(dirname "$canary_catalog")" && pwd -P)/$(basename "$canary_catalog")"
+  canary_mount_args=(
+    --mount "type=bind,src=${canary_catalog},dst=/canary/canary.json,readonly"
+    --env "EXFIL_CANARY_CATALOG=/canary/canary.json"
+  )
+fi
 
 honeynet_user="${EXFIL_HONEYNET_USER:-$(id -u):$(id -g)}"
 [[ "$honeynet_user" =~ ^[0-9]+:[0-9]+$ ]] || fail "EXFIL_HONEYNET_USER must be numeric UID:GID"
@@ -159,11 +175,12 @@ docker network create \
   --internal \
   --label exfil-analyzer.managed=true \
   --label exfil-analyzer.kind=honeynet-network \
-  --label exfil-analyzer.phase=F1.1 \
+  --label exfil-analyzer.phase=F1.3 \
   --label "exfil-analyzer.run_id=$run_id" \
   "$network_name" >/dev/null
 
 http_log="$log_dir/http.jsonl"
+network_log="$log_dir/network.jsonl"
 http_container="exfil-honeynet-http-$run_id"
 docker run -d \
   --rm \
@@ -171,7 +188,7 @@ docker run -d \
   --name "$http_container" \
   --label exfil-analyzer.managed=true \
   --label exfil-analyzer.kind=honeynet-http \
-  --label exfil-analyzer.phase=F1.1 \
+  --label exfil-analyzer.phase=F1.3 \
   --label "exfil-analyzer.run_id=$run_id" \
   --network "$network_name" \
   --cap-drop ALL \
@@ -184,9 +201,11 @@ docker run -d \
   --cpus 0.25 \
   --mount "type=bind,src=${log_dir},dst=/logs" \
   --mount "type=bind,src=${ca_dir},dst=/ca" \
+  "${canary_mount_args[@]}" \
   --env "EXFIL_RUN_ID=$run_id" \
   --env "EXFIL_SAMPLE_ID=$sample_id" \
   --env "EXFIL_HTTP_LOG=/logs/http.jsonl" \
+  --env "EXFIL_NETWORK_LOG=/logs/network.jsonl" \
   --env "EXFIL_TLS_CA_CERT=/ca/exfil-analyzer-ca.pem" \
   "$http_image" >/dev/null
 
@@ -213,7 +232,7 @@ docker run -d \
   --name "$dns_container" \
   --label exfil-analyzer.managed=true \
   --label exfil-analyzer.kind=honeynet-dns \
-  --label exfil-analyzer.phase=F1.1 \
+  --label exfil-analyzer.phase=F1.3 \
   --label "exfil-analyzer.run_id=$run_id" \
   --network "$network_name" \
   --cap-drop ALL \
@@ -229,6 +248,7 @@ docker run -d \
   --env "EXFIL_SAMPLE_ID=$sample_id" \
   --env "EXFIL_DNS_LOG=/logs/dns.jsonl" \
   --env "EXFIL_DNS_RESPONSE_IP=$response_ip" \
+  "${canary_mount_args[@]}" \
   "$dns_image" >/dev/null
 
 sleep 0.3
@@ -243,6 +263,7 @@ dns_ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{
   quote_env EXFIL_HONEYNET_HTTP_IP "$http_ip"
   quote_env EXFIL_HONEYNET_HTTP_CONTAINER "$http_container"
   quote_env EXFIL_HONEYNET_HTTP_LOG "$http_log"
+  quote_env EXFIL_HONEYNET_NETWORK_LOG "$network_log"
   quote_env EXFIL_HONEYNET_CA_CERT "$ca_cert"
   quote_env EXFIL_HONEYNET_RESPONSE_IP "$response_ip"
 } >"${env_file:-/dev/stdout}"

@@ -36,6 +36,17 @@
 - Go TLS API checked locally:
   `go doc crypto/tls Config.GetCertificate`, `go doc crypto/x509 CreateCertificate`,
   `go doc net/http Server.ListenAndServeTLS`, and `go doc crypto/x509 SystemCertPool`.
+- Go connection/flow API checked locally:
+  `go doc net/http Server.ConnContext`, `go doc context.WithValue`,
+  `go doc net Conn.RemoteAddr`, `go doc net Conn.LocalAddr`,
+  `go doc net.Listen`, `go doc net/http Server.Serve`,
+  `go doc net/http Server.ServeTLS`, `go doc crypto/tls Server`,
+  `go doc crypto/tls ClientHelloInfo.Context`, `go doc net.SplitHostPort`,
+  and `go doc strconv.Atoi`.
+- Go canary matching API checked locally:
+  `go doc os.ReadFile`, `go doc encoding/json.Unmarshal`,
+  `go doc strings.Contains`, `go doc strings.ReplaceAll`,
+  and `go doc net/http Request.Header`.
 - Docker F1 network pattern:
   `docker network create --help` on local Docker 29.6.0 confirms `--internal`
   and `--label`; `docker run --help` confirms `--network` and `--dns`.

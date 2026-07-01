@@ -57,6 +57,23 @@ func TestEventResolvedIPMatchesConfiguredAnswer(t *testing.T) {
 	}
 }
 
+func TestCanaryMatcherRedactsDNSQuery(t *testing.T) {
+	const token = "dns-subdomain-token"
+	const secretID = "canary_rsa-dns"
+	matcher := &canaryMatcher{secrets: []canarySecret{{SecretID: secretID, MatchToken: token}}}
+	query := dnsQuery(t, 0x5150, token+".example.test", 1)
+	_, event, err := handleQueryWithMatcher(query, net.ParseIP(defaultResponseIP).To4(), matcher)
+	if err != nil {
+		t.Fatalf("handleQueryWithMatcher failed: %v", err)
+	}
+	if event.Query != "[canary:"+secretID+"].example.test" {
+		t.Fatalf("query = %q", event.Query)
+	}
+	if len(event.CanaryMatch) != 1 || event.CanaryMatch[0] != secretID {
+		t.Fatalf("canary_match = %#v", event.CanaryMatch)
+	}
+}
+
 func TestWriteEventJSONL(t *testing.T) {
 	dir := t.TempDir()
 	logFile, err := openLog(filepath.Join(dir, "dns.jsonl"))

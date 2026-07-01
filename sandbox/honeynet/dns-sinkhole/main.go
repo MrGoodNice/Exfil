@@ -36,6 +36,19 @@ type dnsEvent struct {
 	ContainerID *string  `json:"container_id"`
 }
 
+type canaryCatalog struct {
+	Secrets []canarySecret `json:"secrets"`
+}
+
+type canarySecret struct {
+	SecretID   string `json:"secret_id"`
+	MatchToken string `json:"match_token"`
+}
+
+type canaryMatcher struct {
+	secrets []canarySecret
+}
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "dns-sinkhole: %v\n", err)
@@ -57,6 +70,10 @@ func run() error {
 		return err
 	}
 	defer logFile.Close()
+	matcher, err := loadCanaryMatcher(os.Getenv("EXFIL_CANARY_CATALOG"))
+	if err != nil {
+		return err
+	}
 
 	packetConn, err := net.ListenPacket("udp", listenAddr)
 	if err != nil {
@@ -71,7 +88,7 @@ func run() error {
 			return err
 		}
 		query := append([]byte(nil), buf[:n]...)
-		response, event, err := handleQuery(query, responseIP)
+		response, event, err := handleQueryWithMatcher(query, responseIP, matcher)
 		if err != nil {
 			continue
 		}
@@ -106,6 +123,10 @@ func openLog(path string) (*os.File, error) {
 }
 
 func handleQuery(query []byte, responseIP net.IP) ([]byte, dnsEvent, error) {
+	return handleQueryWithMatcher(query, responseIP, nil)
+}
+
+func handleQueryWithMatcher(query []byte, responseIP net.IP, matcher *canaryMatcher) ([]byte, dnsEvent, error) {
 	// ref: /home/mrg/Desktop/exfil-step-a-refs/flare-fakenet-ng/fakenet/listeners/DNSListener.py:101
 	// Pattern: parse request bytes, extract qname/qtype, then return a fake DNS answer.
 	question, err := parseQuestion(query)
@@ -128,14 +149,67 @@ func handleQuery(query []byte, responseIP net.IP) ([]byte, dnsEvent, error) {
 	}
 	event := dnsEvent{
 		Timestamp:   time.Now().UTC().Format(time.RFC3339Nano),
-		Query:       question.name,
+		Query:       matcher.redact(question.name),
 		QType:       qtypeName(question.qtype),
 		ResolvedIP:  resolvedPtr,
-		CanaryMatch: []string{},
+		CanaryMatch: matcher.match(question.name),
 		Sinkholed:   true,
 		ContainerID: nil,
 	}
 	return response, event, nil
+}
+
+func loadCanaryMatcher(path string) (*canaryMatcher, error) {
+	if path == "" {
+		return nil, nil
+	}
+	// ref: go doc os.ReadFile on Go 1.26.
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read canary catalog: %w", err)
+	}
+	var catalog canaryCatalog
+	// ref: go doc encoding/json.Unmarshal on Go 1.26.
+	if err := json.Unmarshal(raw, &catalog); err != nil {
+		return nil, fmt.Errorf("parse canary catalog: %w", err)
+	}
+	secrets := make([]canarySecret, 0, len(catalog.Secrets))
+	for _, secret := range catalog.Secrets {
+		if secret.SecretID == "" || secret.MatchToken == "" {
+			continue
+		}
+		secrets = append(secrets, secret)
+	}
+	return &canaryMatcher{secrets: secrets}, nil
+}
+
+func (matcher *canaryMatcher) match(value string) []string {
+	if matcher == nil || len(matcher.secrets) == 0 {
+		return []string{}
+	}
+	matches := make([]string, 0, len(matcher.secrets))
+	for _, secret := range matcher.secrets {
+		// ref: go doc strings.Contains on Go 1.26.
+		if strings.Contains(value, secret.MatchToken) {
+			matches = append(matches, secret.SecretID)
+		}
+	}
+	return matches
+}
+
+func (matcher *canaryMatcher) redact(value string) string {
+	if matcher == nil || value == "" {
+		return value
+	}
+	redacted := value
+	for _, secret := range matcher.secrets {
+		if secret.SecretID == "" || secret.MatchToken == "" {
+			continue
+		}
+		// ref: go doc strings.ReplaceAll on Go 1.26.
+		redacted = strings.ReplaceAll(redacted, secret.MatchToken, "[canary:"+secret.SecretID+"]")
+	}
+	return redacted
 }
 
 func parseQuestion(packet []byte) (dnsQuestion, error) {
