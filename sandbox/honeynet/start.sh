@@ -3,21 +3,24 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 dns_dir="$script_dir/dns-sinkhole"
+http_dir="$script_dir/http-listener"
 
 usage() {
   cat >&2 <<'USAGE'
 Usage: sandbox/honeynet/start.sh [--build] --log-dir DIR [OPTIONS]
 
-Starts the F1.0 honeynet DNS sinkhole on a Docker internal network.
+Starts the F1 honeynet DNS sinkhole and HTTP listener on a Docker internal network.
 
 Options:
   --run-id ID          Run id written to dns.jsonl, default f1-0-<timestamp>-<pid>.
   --sample-id ID       Sample id written to dns.jsonl, default manual.
   --network-name NAME  Docker internal network name, default exfil-honeynet-<run-id>.
-  --image IMAGE        DNS sinkhole image, default exfil-honeynet-dns:local.
-  --response-ip IP     IPv4 returned for A records, default 198.51.100.53.
+  --image IMAGE        Alias for --dns-image.
+  --dns-image IMAGE    DNS sinkhole image, default exfil-honeynet-dns:local.
+  --http-image IMAGE   HTTP listener image, default exfil-honeynet-http:local.
+  --response-ip IP     Override IPv4 returned for A records; default HTTP listener IP.
   --env-file FILE      Write source-able EXFIL_HONEYNET_* values to FILE.
-  --build              Build the DNS sinkhole image before starting.
+  --build              Build the honeynet listener images before starting.
 USAGE
 }
 
@@ -40,20 +43,22 @@ quote_env() {
 
 build_image() {
   local image="$1"
+  local source_dir="$2"
   local build_dir
   build_dir="$(mktemp -d)"
   trap 'rm -rf "$build_dir"' RETURN
 
-  (cd "$dns_dir" && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o "$build_dir/dns-sinkhole" .)
-  docker build --pull=false -t "$image" -f "$dns_dir/Dockerfile" "$build_dir" >/dev/null
+  (cd "$source_dir" && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o "$build_dir/$(basename "$source_dir")" .)
+  docker build --pull=false -t "$image" -f "$source_dir/Dockerfile" "$build_dir" >/dev/null
 }
 
 build=0
 run_id="f1-0-$(date +%s)-$$"
 sample_id="manual"
 network_name=""
-image="exfil-honeynet-dns:local"
-response_ip="198.51.100.53"
+dns_image="exfil-honeynet-dns:local"
+http_image="exfil-honeynet-http:local"
+response_ip=""
 log_dir=""
 env_file=""
 
@@ -80,7 +85,17 @@ while [[ $# -gt 0 ]]; do
       ;;
     --image)
       [[ $# -ge 2 ]] || fail "--image requires a value"
-      image="$2"
+      dns_image="$2"
+      shift 2
+      ;;
+    --dns-image)
+      [[ $# -ge 2 ]] || fail "--dns-image requires a value"
+      dns_image="$2"
+      shift 2
+      ;;
+    --http-image)
+      [[ $# -ge 2 ]] || fail "--http-image requires a value"
+      http_image="$2"
       shift 2
       ;;
     --response-ip)
@@ -130,18 +145,53 @@ honeynet_user="${EXFIL_HONEYNET_USER:-$(id -u):$(id -g)}"
 (( 10#${honeynet_user#*:} != 0 )) || fail "refusing root GID 0 for honeynet service"
 
 if [[ "$build" == "1" ]]; then
-  build_image "$image"
+  build_image "$dns_image" "$dns_dir"
+  build_image "$http_image" "$http_dir"
 else
-  docker image inspect "$image" >/dev/null 2>&1 || fail "missing image: $image (use --build)"
+  docker image inspect "$dns_image" >/dev/null 2>&1 || fail "missing image: $dns_image (use --build)"
+  docker image inspect "$http_image" >/dev/null 2>&1 || fail "missing image: $http_image (use --build)"
 fi
 
 docker network create \
   --internal \
   --label exfil-analyzer.managed=true \
   --label exfil-analyzer.kind=honeynet-network \
-  --label exfil-analyzer.phase=F1.0 \
+  --label exfil-analyzer.phase=F1.1 \
   --label "exfil-analyzer.run_id=$run_id" \
   "$network_name" >/dev/null
+
+http_log="$log_dir/http.jsonl"
+http_container="exfil-honeynet-http-$run_id"
+docker run -d \
+  --rm \
+  --pull never \
+  --name "$http_container" \
+  --label exfil-analyzer.managed=true \
+  --label exfil-analyzer.kind=honeynet-http \
+  --label exfil-analyzer.phase=F1.1 \
+  --label "exfil-analyzer.run_id=$run_id" \
+  --network "$network_name" \
+  --cap-drop ALL \
+  --security-opt no-new-privileges \
+  --read-only \
+  --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m \
+  --user "$honeynet_user" \
+  --pids-limit 64 \
+  --memory 128m \
+  --cpus 0.25 \
+  --mount "type=bind,src=${log_dir},dst=/logs" \
+  --env "EXFIL_RUN_ID=$run_id" \
+  --env "EXFIL_SAMPLE_ID=$sample_id" \
+  --env "EXFIL_HTTP_LOG=/logs/http.jsonl" \
+  "$http_image" >/dev/null
+
+sleep 0.3
+http_ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$http_container")"
+[[ -n "$http_ip" ]] || fail "could not inspect HTTP container IP"
+
+if [[ -z "$response_ip" ]]; then
+  response_ip="$http_ip"
+fi
 
 dns_container="exfil-honeynet-dns-$run_id"
 docker run -d \
@@ -150,7 +200,7 @@ docker run -d \
   --name "$dns_container" \
   --label exfil-analyzer.managed=true \
   --label exfil-analyzer.kind=honeynet-dns \
-  --label exfil-analyzer.phase=F1.0 \
+  --label exfil-analyzer.phase=F1.1 \
   --label "exfil-analyzer.run_id=$run_id" \
   --network "$network_name" \
   --cap-drop ALL \
@@ -166,7 +216,7 @@ docker run -d \
   --env "EXFIL_SAMPLE_ID=$sample_id" \
   --env "EXFIL_DNS_LOG=/logs/dns.jsonl" \
   --env "EXFIL_DNS_RESPONSE_IP=$response_ip" \
-  "$image" >/dev/null
+  "$dns_image" >/dev/null
 
 sleep 0.3
 dns_ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$dns_container")"
@@ -177,5 +227,8 @@ dns_ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{
   quote_env EXFIL_HONEYNET_DNS_IP "$dns_ip"
   quote_env EXFIL_HONEYNET_DNS_CONTAINER "$dns_container"
   quote_env EXFIL_HONEYNET_DNS_LOG "$dns_log"
+  quote_env EXFIL_HONEYNET_HTTP_IP "$http_ip"
+  quote_env EXFIL_HONEYNET_HTTP_CONTAINER "$http_container"
+  quote_env EXFIL_HONEYNET_HTTP_LOG "$http_log"
   quote_env EXFIL_HONEYNET_RESPONSE_IP "$response_ip"
 } >"${env_file:-/dev/stdout}"
