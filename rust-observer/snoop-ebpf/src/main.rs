@@ -9,19 +9,26 @@ mod maps;
 use aya_ebpf::{
     helpers::{
         bpf_get_current_cgroup_id, bpf_get_current_comm, bpf_get_current_pid_tgid,
-        bpf_ktime_get_ns, bpf_probe_read_kernel_str_bytes, bpf_probe_read_user_str_bytes,
+        bpf_ktime_get_ns, bpf_probe_read_kernel_str_bytes, bpf_probe_read_user,
+        bpf_probe_read_user_str_bytes,
     },
-    macros::tracepoint,
-    programs::TracePointContext,
+    macros::{kprobe, kretprobe, tracepoint},
+    programs::{ProbeContext, RetProbeContext, TracePointContext},
     EbpfContext,
 };
 #[cfg(target_arch = "bpf")]
 use snoop_common::{
-    SensorEvent, EVENT_KIND_EXECVE, EVENT_KIND_EXIT, EVENT_KIND_OPENAT, SENSOR_PATH_MAX,
+    ConnectArgs, SensorEvent, EVENT_KIND_CONNECT, EVENT_KIND_EXECVE, EVENT_KIND_EXIT,
+    EVENT_KIND_OPENAT, PROTO_OTHER, PROTO_TCP, SENSOR_AF_INET, SENSOR_AF_INET6, SENSOR_PATH_MAX,
 };
 
 #[cfg(target_arch = "bpf")]
-use crate::maps::EVENTS;
+use crate::maps::{CONNECT_ARGS, EVENTS};
+
+#[cfg(target_arch = "bpf")]
+const AF_INET: u16 = SENSOR_AF_INET;
+#[cfg(target_arch = "bpf")]
+const AF_INET6: u16 = SENSOR_AF_INET6;
 
 #[cfg(target_arch = "bpf")]
 #[panic_handler]
@@ -53,6 +60,24 @@ pub fn sched_process_exec(ctx: TracePointContext) -> i64 {
 #[tracepoint(name = "sched_process_exit", category = "sched")]
 pub fn sched_process_exit(_ctx: TracePointContext) -> i64 {
     match try_sched_process_exit() {
+        Ok(()) => 0,
+        Err(_) => 0,
+    }
+}
+
+#[cfg(target_arch = "bpf")]
+#[kprobe(function = "__sys_connect")]
+pub fn net_enter_sys_connect(ctx: ProbeContext) -> i64 {
+    match try_net_enter_sys_connect(&ctx) {
+        Ok(()) => 0,
+        Err(_) => 0,
+    }
+}
+
+#[cfg(target_arch = "bpf")]
+#[kretprobe(function = "__sys_connect")]
+pub fn net_exit_sys_connect(ctx: RetProbeContext) -> i64 {
+    match try_net_exit_sys_connect(&ctx) {
         Ok(()) => 0,
         Err(_) => 0,
     }
@@ -119,6 +144,57 @@ fn try_sched_process_exit() -> Result<(), i64> {
 
 #[cfg(target_arch = "bpf")]
 #[inline(always)]
+fn try_net_enter_sys_connect(ctx: &ProbeContext) -> Result<(), i64> {
+    // ref: /home/mrg/Desktop/exfil-step-a-refs/kunai/kunai-ebpf/src/probes/connect.rs:15
+    let fd: i32 = ctx.arg(0).ok_or(1i64)?;
+    let sockaddr_ptr: *const u8 = ctx.arg(1).ok_or(1i64)?;
+    if sockaddr_ptr.is_null() {
+        return Ok(());
+    }
+    let mut args = ConnectArgs::empty();
+    args.fd = fd;
+    if !read_sockaddr(sockaddr_ptr, &mut args) {
+        return Ok(());
+    }
+    let key = bpf_get_current_pid_tgid();
+    // ref: /home/mrg/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/aya-ebpf-0.1.1/src/maps/hash_map.rs:152
+    let _ = CONNECT_ARGS.insert(&key, &args, 0);
+    Ok(())
+}
+
+#[cfg(target_arch = "bpf")]
+#[inline(always)]
+fn try_net_exit_sys_connect(ctx: &RetProbeContext) -> Result<(), i64> {
+    // ref: /home/mrg/Desktop/exfil-step-a-refs/kunai/kunai-ebpf/src/probes/connect.rs:27
+    let key = bpf_get_current_pid_tgid();
+    // ref: /home/mrg/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/aya-ebpf-0.1.1/src/maps/hash_map.rs:130
+    let saved = match unsafe { CONNECT_ARGS.get(&key) } {
+        Some(args) => *args,
+        None => return Ok(()),
+    };
+    // ref: /home/mrg/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/aya-ebpf-0.1.1/src/maps/hash_map.rs:158
+    let _ = CONNECT_ARGS.remove(&key);
+
+    let mut entry = match EVENTS.reserve::<SensorEvent>(0) {
+        Some(entry) => entry,
+        None => return Ok(()),
+    };
+    let event = entry.as_mut_ptr();
+    write_base_event(event, EVENT_KIND_CONNECT);
+    unsafe {
+        core::ptr::addr_of_mut!((*event).retval).write(ctx.ret::<i64>().unwrap_or(0));
+        core::ptr::addr_of_mut!((*event).fd).write(saved.fd);
+        core::ptr::addr_of_mut!((*event).dst_port).write(saved.dst_port);
+        core::ptr::addr_of_mut!((*event).dst_family).write(saved.dst_family);
+        core::ptr::addr_of_mut!((*event).proto).write(saved.proto);
+        core::ptr::addr_of_mut!((*event).dst_ip).write(saved.dst_ip);
+    }
+    entry.submit(0);
+    Ok(())
+}
+
+#[cfg(target_arch = "bpf")]
+#[inline(always)]
 fn write_base_event(event: *mut SensorEvent, kind: u32) {
     let pid_tgid = bpf_get_current_pid_tgid();
     let tgid = (pid_tgid >> 32) as u32;
@@ -135,8 +211,70 @@ fn write_base_event(event: *mut SensorEvent, kind: u32) {
         core::ptr::addr_of_mut!((*event).path_len).write(0);
         core::ptr::addr_of_mut!((*event).exe_len).write(0);
         core::ptr::addr_of_mut!((*event)._pad).write(0);
+        core::ptr::addr_of_mut!((*event).retval).write(0);
+        core::ptr::addr_of_mut!((*event).fd).write(0);
+        core::ptr::addr_of_mut!((*event).dst_port).write(0);
+        core::ptr::addr_of_mut!((*event).dst_family).write(0);
+        core::ptr::addr_of_mut!((*event).proto).write(PROTO_OTHER);
+        core::ptr::addr_of_mut!((*event)._pad2).write([0; 3]);
+        core::ptr::addr_of_mut!((*event).dst_ip).write([0; 16]);
         core::ptr::addr_of_mut!((*event).path).write_bytes(0, 1);
         core::ptr::addr_of_mut!((*event).exe).write_bytes(0, 1);
+    }
+}
+
+#[cfg(target_arch = "bpf")]
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct SockaddrIn {
+    family: u16,
+    port: u16,
+    addr: [u8; 4],
+    _zero: [u8; 8],
+}
+
+#[cfg(target_arch = "bpf")]
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct SockaddrIn6 {
+    family: u16,
+    port: u16,
+    flowinfo: u32,
+    addr: [u8; 16],
+    scope_id: u32,
+}
+
+#[cfg(target_arch = "bpf")]
+#[inline(always)]
+fn read_sockaddr(sockaddr_ptr: *const u8, args: &mut ConnectArgs) -> bool {
+    // ref: /home/mrg/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/aya-ebpf-0.1.1/src/helpers.rs:122
+    let family = match unsafe { bpf_probe_read_user(sockaddr_ptr as *const u16) } {
+        Ok(value) => value,
+        Err(_) => return false,
+    };
+    args.dst_family = family;
+    args.proto = PROTO_TCP;
+    match family {
+        AF_INET => {
+            let sockaddr = match unsafe { bpf_probe_read_user(sockaddr_ptr as *const SockaddrIn) } {
+                Ok(value) => value,
+                Err(_) => return false,
+            };
+            args.dst_port = u16::from_be(sockaddr.port);
+            args.dst_ip[..4].copy_from_slice(&sockaddr.addr);
+            true
+        }
+        AF_INET6 => {
+            let sockaddr = match unsafe { bpf_probe_read_user(sockaddr_ptr as *const SockaddrIn6) }
+            {
+                Ok(value) => value,
+                Err(_) => return false,
+            };
+            args.dst_port = u16::from_be(sockaddr.port);
+            args.dst_ip.copy_from_slice(&sockaddr.addr);
+            true
+        }
+        _ => false,
     }
 }
 

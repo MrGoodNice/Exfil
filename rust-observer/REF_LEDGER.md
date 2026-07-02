@@ -34,3 +34,24 @@ F2.1 scope note: full kunai cgroup path resolution is recorded above but not por
 This slice uses the kernel helper `bpf_get_current_cgroup_id()` for the JSON `cgroup_id` string
 and userspace filtering. Runtime review should verify that helper value scopes the target cgroup
 correctly on kernel 6.18.
+
+## F2.2
+
+- `/home/mrg/Desktop/exfil-step-a-refs/kunai/kunai-ebpf/src/probes/connect.rs:15` — kprobe on `__sys_connect` for connect entry.
+- `/home/mrg/Desktop/exfil-step-a-refs/kunai/kunai-ebpf/src/probes/connect.rs:27` — kretprobe on `__sys_connect` for connect return.
+- `/home/mrg/Desktop/exfil-step-a-refs/kunai/kunai-ebpf/src/probes/connect.rs:58` — entry fd from kprobe arg0.
+- `/home/mrg/Desktop/exfil-step-a-refs/kunai/kunai-ebpf/src/probes/connect.rs:59` — entry sockaddr pointer from kprobe arg1.
+- `/home/mrg/Desktop/exfil-step-a-refs/kunai/kunai-ebpf/src/probes/connect.rs:79` — AF_INET/AF_INET6 split for dst extraction.
+- `/home/mrg/Desktop/exfil-step-a-refs/kunai/kunai-common/src/kprobe/bpf.rs:16` — LRU map used for kprobe-entry context stash.
+- `/home/mrg/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/aya-ebpf-0.1.1/src/programs/probe.rs:49` — `ProbeContext::arg` signature.
+- `/home/mrg/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/aya-ebpf-0.1.1/src/programs/retprobe.rs:43` — `RetProbeContext::ret` signature.
+- `/home/mrg/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/aya-ebpf-0.1.1/src/helpers.rs:122` — `bpf_probe_read_user<T>` for userspace sockaddr reads.
+- `/home/mrg/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/aya-ebpf-0.1.1/src/maps/hash_map.rs:98` — `LruHashMap::with_max_entries`.
+- `/home/mrg/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/aya-ebpf-0.1.1/src/maps/hash_map.rs:130` — `LruHashMap::get`.
+- `/home/mrg/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/aya-ebpf-0.1.1/src/maps/hash_map.rs:152` — `LruHashMap::insert`.
+- `/home/mrg/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/aya-ebpf-0.1.1/src/maps/hash_map.rs:158` — `LruHashMap::remove`.
+- `/home/mrg/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/aya-0.13.1/src/programs/kprobe.rs:76` — userspace `KProbe::attach(function, offset)`.
+
+F2.2 scope note: dst address and `retval` are captured from `__sys_connect` metadata only.
+This slice does not port kunai's full CO-RE `fd -> file -> socket -> sk_type` traversal; the
+runtime sample is TCP (`wget`) and Java correlation must not treat `retval` or proto as taint/block.

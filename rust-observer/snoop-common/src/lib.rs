@@ -6,6 +6,12 @@ pub const SENSOR_COMM_MAX: usize = 16;
 pub const EVENT_KIND_OPENAT: u32 = 1;
 pub const EVENT_KIND_EXECVE: u32 = 2;
 pub const EVENT_KIND_EXIT: u32 = 3;
+pub const EVENT_KIND_CONNECT: u32 = 4;
+pub const SENSOR_AF_INET: u16 = 2;
+pub const SENSOR_AF_INET6: u16 = 10;
+pub const PROTO_OTHER: u8 = 0;
+pub const PROTO_TCP: u8 = 1;
+pub const PROTO_UDP: u8 = 2;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
@@ -29,8 +35,46 @@ pub struct SensorEvent {
     pub path_len: u16,
     pub exe_len: u16,
     pub _pad: u32,
+    pub retval: i64,
+    pub fd: i32,
+    pub dst_port: u16,
+    pub dst_family: u16,
+    pub proto: u8,
+    pub _pad2: [u8; 3],
+    pub dst_ip: [u8; 16],
     pub path: [u8; SENSOR_PATH_MAX],
     pub exe: [u8; SENSOR_PATH_MAX],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct ConnectArgs {
+    pub fd: i32,
+    pub dst_family: u16,
+    pub dst_port: u16,
+    pub proto: u8,
+    pub _pad: [u8; 3],
+    pub dst_ip: [u8; 16],
+}
+
+impl ConnectArgs {
+    #[inline]
+    pub fn empty() -> Self {
+        Self {
+            fd: 0,
+            dst_family: 0,
+            dst_port: 0,
+            proto: PROTO_OTHER,
+            _pad: [0; 3],
+            dst_ip: [0; 16],
+        }
+    }
+}
+
+impl Default for ConnectArgs {
+    fn default() -> Self {
+        Self::empty()
+    }
 }
 
 impl SensorEvent {
@@ -47,6 +91,13 @@ impl SensorEvent {
             path_len: 0,
             exe_len: 0,
             _pad: 0,
+            retval: 0,
+            fd: 0,
+            dst_port: 0,
+            dst_family: 0,
+            proto: PROTO_OTHER,
+            _pad2: [0; 3],
+            dst_ip: [0; 16],
             path: [0; SENSOR_PATH_MAX],
             exe: [0; SENSOR_PATH_MAX],
         }
@@ -67,6 +118,15 @@ impl SensorEvent {
     #[inline]
     pub fn comm_bytes(&self) -> &[u8] {
         trim_nul(&self.comm)
+    }
+
+    #[inline]
+    pub fn dst_ip_bytes(&self) -> &[u8] {
+        match self.dst_family {
+            SENSOR_AF_INET => &self.dst_ip[..4],
+            SENSOR_AF_INET6 => &self.dst_ip[..16],
+            _ => &[],
+        }
     }
 }
 

@@ -2,6 +2,7 @@ use std::{
     error::Error,
     fs::{self, File, OpenOptions},
     io::{BufWriter, Write},
+    net::{Ipv4Addr, Ipv6Addr},
     path::{Path, PathBuf},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -9,11 +10,14 @@ use std::{
 #[cfg(target_os = "linux")]
 use aya::{
     maps::{MapData, RingBuf},
-    programs::TracePoint,
+    programs::{KProbe, TracePoint},
     Ebpf,
 };
 use serde_json::{json, Value};
-use snoop_common::{SensorEvent, EVENT_KIND_EXECVE, EVENT_KIND_EXIT, EVENT_KIND_OPENAT};
+use snoop_common::{
+    SensorEvent, EVENT_KIND_CONNECT, EVENT_KIND_EXECVE, EVENT_KIND_EXIT, EVENT_KIND_OPENAT,
+    PROTO_TCP, PROTO_UDP, SENSOR_AF_INET, SENSOR_AF_INET6,
+};
 
 #[derive(Clone, Debug)]
 pub struct SensorConfig {
@@ -21,6 +25,7 @@ pub struct SensorConfig {
     pub sample_id: String,
     pub files_log: PathBuf,
     pub proc_log: PathBuf,
+    pub network_log: Option<PathBuf>,
     pub canary_catalog: Option<PathBuf>,
     pub canary_mount: String,
     pub target_cgroup_id: Option<u64>,
@@ -38,6 +43,10 @@ impl SensorConfig {
             std::env::var("EXFIL_SAMPLE_ID").unwrap_or_else(|_| "unknown-sample".into());
         let mut files_log = std::env::var("EXFIL_FILES_LOG").ok().map(PathBuf::from);
         let mut proc_log = std::env::var("EXFIL_PROC_LOG").ok().map(PathBuf::from);
+        let mut network_log = std::env::var("EXFIL_NETWORK_LOG")
+            .ok()
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from);
         let mut canary_catalog = std::env::var("EXFIL_CANARY_CATALOG")
             .ok()
             .filter(|value| !value.is_empty())
@@ -66,6 +75,9 @@ impl SensorConfig {
                 "--proc-log" => {
                     proc_log = Some(PathBuf::from(require_arg(&mut iter, "--proc-log")?))
                 }
+                "--network-log" => {
+                    network_log = Some(PathBuf::from(require_arg(&mut iter, "--network-log")?))
+                }
                 "--canary-catalog" => {
                     canary_catalog =
                         Some(PathBuf::from(require_arg(&mut iter, "--canary-catalog")?));
@@ -89,6 +101,7 @@ impl SensorConfig {
             sample_id,
             files_log: files_log.ok_or("EXFIL_FILES_LOG or --files-log is required")?,
             proc_log: proc_log.ok_or("EXFIL_PROC_LOG or --proc-log is required")?,
+            network_log,
             canary_catalog,
             canary_mount,
             target_cgroup_id,
@@ -175,6 +188,8 @@ pub fn run_sensor(config: SensorConfig, ebpf_bytes: &[u8]) -> Result<(), Box<dyn
         "sched",
         "sched_process_exit",
     )?;
+    attach_kprobe(&mut ebpf, "net_enter_sys_connect", "__sys_connect")?;
+    attach_kprobe(&mut ebpf, "net_exit_sys_connect", "__sys_connect")?;
 
     let map = ebpf
         .take_map("EVENTS")
@@ -182,6 +197,10 @@ pub fn run_sensor(config: SensorConfig, ebpf_bytes: &[u8]) -> Result<(), Box<dyn
     let mut ring_buf: RingBuf<MapData> = RingBuf::try_from(map)?;
     let mut files = open_jsonl(&config.files_log)?;
     let mut procs = open_jsonl(&config.proc_log)?;
+    let mut network = match &config.network_log {
+        Some(path) => Some(open_jsonl(path)?),
+        None => None,
+    };
 
     let deadline = std::time::Instant::now() + config.duration;
     while std::time::Instant::now() < deadline {
@@ -202,6 +221,12 @@ pub fn run_sensor(config: SensorConfig, ebpf_bytes: &[u8]) -> Result<(), Box<dyn
                     let value = render_proc_event(&event, &config);
                     write_json_line(&mut procs, &value)?;
                 }
+                EVENT_KIND_CONNECT => {
+                    if let Some(writer) = network.as_mut() {
+                        let value = render_network_event(&event, &config);
+                        write_json_line(writer, &value)?;
+                    }
+                }
                 _ => {}
             }
         }
@@ -209,6 +234,9 @@ pub fn run_sensor(config: SensorConfig, ebpf_bytes: &[u8]) -> Result<(), Box<dyn
     }
     files.flush()?;
     procs.flush()?;
+    if let Some(writer) = network.as_mut() {
+        writer.flush()?;
+    }
     drop(ebpf);
     Ok(())
 }
@@ -232,6 +260,22 @@ fn attach_tracepoint(
         .try_into()?;
     program.load()?;
     program.attach(category, tracepoint)?;
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn attach_kprobe(
+    ebpf: &mut Ebpf,
+    program_name: &str,
+    function: &str,
+) -> Result<(), Box<dyn Error>> {
+    // ref: /home/mrg/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/aya-0.13.1/src/programs/kprobe.rs:76
+    let program: &mut KProbe = ebpf
+        .program_mut(program_name)
+        .ok_or_else(|| format!("program `{program_name}` not found"))?
+        .try_into()?;
+    program.load()?;
+    program.attach(function, 0)?;
     Ok(())
 }
 
@@ -314,6 +358,57 @@ pub fn render_proc_event(event: &SensorEvent, config: &SensorConfig) -> Value {
     })
 }
 
+pub fn render_network_event(event: &SensorEvent, config: &SensorConfig) -> Value {
+    json!({
+        "ts": rfc3339_now(),
+        "run_id": config.run_id,
+        "sample_id": config.sample_id,
+        "source": "aya_connect",
+        "flow_id": null,
+        "pid": event.pid,
+        "src_ip": null,
+        "src_port": null,
+        "dst_ip": dst_ip_string(event),
+        "dst_port": event.dst_port,
+        "proto": proto_name(event.proto),
+        "retval": event.retval,
+        "container_id": config.container_id,
+        "cgroup_id": cgroup_json(event.cgroup_id),
+    })
+}
+
+fn dst_ip_string(event: &SensorEvent) -> String {
+    match event.dst_family {
+        SENSOR_AF_INET => {
+            let bytes = event.dst_ip_bytes();
+            if bytes.len() == 4 {
+                Ipv4Addr::new(bytes[0], bytes[1], bytes[2], bytes[3]).to_string()
+            } else {
+                String::new()
+            }
+        }
+        SENSOR_AF_INET6 => {
+            let bytes = event.dst_ip_bytes();
+            if bytes.len() == 16 {
+                let mut octets = [0u8; 16];
+                octets.copy_from_slice(bytes);
+                Ipv6Addr::from(octets).to_string()
+            } else {
+                String::new()
+            }
+        }
+        _ => String::new(),
+    }
+}
+
+fn proto_name(proto: u8) -> &'static str {
+    match proto {
+        PROTO_TCP => "tcp",
+        PROTO_UDP => "udp",
+        _ => "other",
+    }
+}
+
 fn cgroup_json(cgroup_id: u64) -> Option<String> {
     if cgroup_id == 0 {
         None
@@ -392,6 +487,7 @@ pub mod tests {
             sample_id: "sample-test".into(),
             files_log: PathBuf::from("/tmp/files.jsonl"),
             proc_log: PathBuf::from("/tmp/proc.jsonl"),
+            network_log: Some(PathBuf::from("/tmp/network.jsonl")),
             canary_catalog: None,
             canary_mount: "/canary".into(),
             target_cgroup_id: Some(42),
@@ -489,6 +585,43 @@ pub mod tests {
         assert!(value["argv_hash"].as_str().unwrap().len() == 16);
         assert_eq!(value["container_id"], "container-test");
         assert_eq!(value["cgroup_id"], "42");
+    }
+
+    #[test]
+    fn render_network_event_matches_schema_shape_for_ipv4() {
+        let mut event = base_event(EVENT_KIND_CONNECT);
+        event.dst_family = SENSOR_AF_INET;
+        event.dst_ip[..4].copy_from_slice(&[198, 51, 100, 10]);
+        event.dst_port = 80;
+        event.proto = PROTO_TCP;
+        event.retval = -101;
+        let value = render_network_event(&event, &test_config());
+        assert_eq!(value["run_id"], "run-test");
+        assert_eq!(value["sample_id"], "sample-test");
+        assert_eq!(value["source"], "aya_connect");
+        assert!(value["flow_id"].is_null());
+        assert_eq!(value["pid"], 1234);
+        assert!(value["src_ip"].is_null());
+        assert!(value["src_port"].is_null());
+        assert_eq!(value["dst_ip"], "198.51.100.10");
+        assert_eq!(value["dst_port"], 80);
+        assert_eq!(value["proto"], "tcp");
+        assert_eq!(value["retval"], -101);
+        assert_eq!(value["container_id"], "container-test");
+        assert_eq!(value["cgroup_id"], "42");
+    }
+
+    #[test]
+    fn render_network_event_matches_schema_shape_for_ipv6() {
+        let mut event = base_event(EVENT_KIND_CONNECT);
+        event.dst_family = SENSOR_AF_INET6;
+        event.dst_ip = [0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1];
+        event.dst_port = 443;
+        event.proto = PROTO_UDP;
+        let value = render_network_event(&event, &test_config());
+        assert_eq!(value["dst_ip"], "2001:db8::1");
+        assert_eq!(value["dst_port"], 443);
+        assert_eq!(value["proto"], "udp");
     }
 
     #[test]
