@@ -1,5 +1,7 @@
 use std::{error::Error, process::ExitCode};
 
+pub mod sensor;
+
 #[cfg(target_os = "linux")]
 use std::{
     process::Command,
@@ -15,7 +17,7 @@ use aya::{
     Ebpf,
 };
 #[cfg(target_os = "linux")]
-use snoop_common::BringupEvent;
+use snoop_common::{SensorEvent, EVENT_KIND_EXECVE};
 
 #[cfg(target_os = "linux")]
 static SNOOP_EBPF_BYTES: &[u8] = include_bytes_aligned!(concat!(env!("OUT_DIR"), "/snoop-ebpf"));
@@ -38,6 +40,11 @@ fn run() -> Result<(), Box<dyn Error>> {
     let self_test = std::env::args().any(|arg| arg == "--self-test");
     if self_test {
         return run_self_test();
+    }
+    let sensor_mode = std::env::args().any(|arg| arg == "--sensor");
+    if sensor_mode {
+        let config = sensor::SensorConfig::from_env_and_args(std::env::args().skip(1))?;
+        return sensor::run_sensor(config, SNOOP_EBPF_BYTES);
     }
     println!("{}", snoop_common::OBSERVER_NAME);
     Ok(())
@@ -78,13 +85,13 @@ fn run_self_test() -> Result<(), Box<dyn Error>> {
     let deadline = Instant::now() + Duration::from_secs(2);
     while Instant::now() < deadline {
         while let Some(item) = ring_buf.next() {
-            if item.len() < std::mem::size_of::<BringupEvent>() {
+            if item.len() < std::mem::size_of::<SensorEvent>() {
                 continue;
             }
             // ref: /home/mrg/Desktop/exfil-step-a-refs/snoop/snoop/src/tracer.rs:272
-            let event = unsafe { std::ptr::read_unaligned(item.as_ptr() as *const BringupEvent) };
-            if event.counter == 1 {
-                println!("f2_0_self_test_event pid={} tid={}", event.pid, event.tid);
+            let event = unsafe { std::ptr::read_unaligned(item.as_ptr() as *const SensorEvent) };
+            if event.kind == EVENT_KIND_EXECVE {
+                println!("f2_0_self_test_event pid={} tgid={}", event.pid, event.tgid);
                 drop(ebpf);
                 return Ok(());
             }
