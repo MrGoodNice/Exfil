@@ -2,8 +2,11 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
+	"encoding/hex"
 	"encoding/json"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -336,6 +339,35 @@ func TestCanaryMatcherNoTokenMatchesEmpty(t *testing.T) {
 	}
 }
 
+func TestScanRequestBodyStreamsHashAndMatchesTokenAcrossChunks(t *testing.T) {
+	const token = "streaming-canary-token"
+	const secretID = "canary_rsa-stream"
+	prefixSize := int64(requestBodyChunkSize*3 + 17)
+	suffixSize := int64(requestBodyChunkSize*2 + 5)
+	matcher := &canaryMatcher{secrets: []canarySecret{{SecretID: secretID, MatchToken: token}}}
+	body := io.MultiReader(
+		&fixedByteReader{remaining: prefixSize, value: 'A'},
+		strings.NewReader(token[:8]),
+		strings.NewReader(token[8:]),
+		&fixedByteReader{remaining: suffixSize, value: 'B'},
+	)
+
+	bodyHash, bodyMatches, err := scanRequestBody(body, matcher)
+	if err != nil {
+		t.Fatalf("scanRequestBody failed: %v", err)
+	}
+	if bodyHash == nil {
+		t.Fatalf("body hash is nil")
+	}
+	if *bodyHash != expectedStreamHash(prefixSize, 'A', token, suffixSize, 'B') {
+		t.Fatalf("request_body_sha256 = %s", *bodyHash)
+	}
+	matches := matcher.matchesFromSet(bodyMatches)
+	if len(matches) != 1 || matches[0] != secretID {
+		t.Fatalf("body matches = %#v", matches)
+	}
+}
+
 func readEvents(t *testing.T, path string) []map[string]any {
 	t.Helper()
 	raw, err := os.ReadFile(path)
@@ -415,3 +447,30 @@ type fakeConn struct {
 
 func (conn fakeConn) RemoteAddr() net.Addr { return conn.remote }
 func (conn fakeConn) LocalAddr() net.Addr  { return conn.local }
+
+type fixedByteReader struct {
+	remaining int64
+	value     byte
+}
+
+func (reader *fixedByteReader) Read(buffer []byte) (int, error) {
+	if reader.remaining == 0 {
+		return 0, io.EOF
+	}
+	if int64(len(buffer)) > reader.remaining {
+		buffer = buffer[:reader.remaining]
+	}
+	for index := range buffer {
+		buffer[index] = reader.value
+	}
+	reader.remaining -= int64(len(buffer))
+	return len(buffer), nil
+}
+
+func expectedStreamHash(prefixSize int64, prefix byte, token string, suffixSize int64, suffix byte) string {
+	hasher := sha256.New()
+	_, _ = io.Copy(hasher, &fixedByteReader{remaining: prefixSize, value: prefix})
+	_, _ = hasher.Write([]byte(token))
+	_, _ = io.Copy(hasher, &fixedByteReader{remaining: suffixSize, value: suffix})
+	return hex.EncodeToString(hasher.Sum(nil))
+}

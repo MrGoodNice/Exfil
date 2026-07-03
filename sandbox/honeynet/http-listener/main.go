@@ -26,9 +26,10 @@ import (
 )
 
 const (
-	defaultListenAddr = ":80"
-	defaultTLSAddr    = ":443"
-	syntheticBody     = "exfil-analyzer synthetic response\n"
+	defaultListenAddr    = ":80"
+	defaultTLSAddr       = ":443"
+	requestBodyChunkSize = 32 * 1024
+	syntheticBody        = "exfil-analyzer synthetic response\n"
 )
 
 type httpEvent struct {
@@ -244,10 +245,18 @@ func syntheticHandler(logger *eventLogger, runID, sampleID string, tlsTerminated
 			flow.noteTLSHost(request.Host)
 			flowID = flow.id
 		}
-		body, _ := io.ReadAll(request.Body)
 		method := request.Method
 		path := request.URL.RequestURI()
-		canaryMatches := matcher.match(request.Host, request.Header, path, body)
+		matchSet := matcher.matchMetadata(request.Host, request.Header, path)
+		requestHash, bodyMatches, err := scanRequestBody(request.Body, matcher)
+		if err != nil {
+			http.Error(writer, "honeynet body read error", http.StatusBadRequest)
+			return
+		}
+		for secretID := range bodyMatches {
+			matchSet[secretID] = true
+		}
+		canaryMatches := matcher.matchesFromSet(matchSet)
 		loggedHost := matcher.redact(request.Host)
 		loggedPath := matcher.redact(path)
 		responseHash := sha256Hex([]byte(syntheticBody))
@@ -262,7 +271,7 @@ func syntheticHandler(logger *eventLogger, runID, sampleID string, tlsTerminated
 			TLS:                tlsTerminated,
 			OpaqueReason:       nil,
 			CanaryMatch:        canaryMatches,
-			RequestBodySHA256:  bodyHash(body),
+			RequestBodySHA256:  requestHash,
 			ResponseBodySHA256: &responseHash,
 			Upstream:           false,
 		}
@@ -320,31 +329,92 @@ func loadCanaryMatcher(path string) (*canaryMatcher, error) {
 	return &canaryMatcher{secrets: secrets}, nil
 }
 
+type canaryMatchSet map[string]bool
+
 func (matcher *canaryMatcher) match(host string, headers http.Header, requestURI string, body []byte) []string {
-	if matcher == nil || len(matcher.secrets) == 0 {
-		return []string{}
+	matches := matcher.matchMetadata(host, headers, requestURI)
+	if len(body) > 0 {
+		matcher.matchBodyBytes(body, matches)
 	}
-	candidates := []string{host, requestURI, string(body)}
+	return matcher.matchesFromSet(matches)
+}
+
+func (matcher *canaryMatcher) matchMetadata(host string, headers http.Header, requestURI string) canaryMatchSet {
+	matches := make(canaryMatchSet)
+	if matcher == nil || len(matcher.secrets) == 0 {
+		return matches
+	}
+	candidates := []string{host, requestURI}
 	// ref: go doc net/http Request.Header on Go 1.26.
 	for _, values := range headers {
 		candidates = append(candidates, values...)
 	}
-	matches := make([]string, 0, len(matcher.secrets))
-	seen := make(map[string]bool, len(matcher.secrets))
-	for _, secret := range matcher.secrets {
-		if seen[secret.SecretID] {
-			continue
-		}
-		for _, candidate := range candidates {
-			// ref: go doc strings.Contains on Go 1.26.
-			if strings.Contains(candidate, secret.MatchToken) {
-				matches = append(matches, secret.SecretID)
-				seen[secret.SecretID] = true
-				break
-			}
-		}
+	for _, candidate := range candidates {
+		matcher.matchCandidate(candidate, matches)
 	}
 	return matches
+}
+
+func (matcher *canaryMatcher) matchCandidate(candidate string, matches canaryMatchSet) {
+	if matcher == nil || candidate == "" {
+		return
+	}
+	for _, secret := range matcher.secrets {
+		if matches[secret.SecretID] {
+			continue
+		}
+		// ref: go doc strings.Contains on Go 1.26.
+		if strings.Contains(candidate, secret.MatchToken) {
+			matches[secret.SecretID] = true
+		}
+	}
+}
+
+func (matcher *canaryMatcher) matchBodyBytes(body []byte, matches canaryMatchSet) {
+	if matcher == nil || len(body) == 0 {
+		return
+	}
+	tail := ""
+	maxTail := matcher.maxMatchTokenLen() - 1
+	if maxTail < 0 {
+		maxTail = 0
+	}
+	for len(body) > 0 {
+		n := requestBodyChunkSize
+		if len(body) < n {
+			n = len(body)
+		}
+		candidate := tail + string(body[:n])
+		matcher.matchCandidate(candidate, matches)
+		tail = boundedSuffix(candidate, maxTail)
+		body = body[n:]
+	}
+}
+
+func (matcher *canaryMatcher) matchesFromSet(matches canaryMatchSet) []string {
+	if matcher == nil || len(matches) == 0 {
+		return []string{}
+	}
+	ordered := make([]string, 0, len(matches))
+	for _, secret := range matcher.secrets {
+		if matches[secret.SecretID] {
+			ordered = append(ordered, secret.SecretID)
+		}
+	}
+	return ordered
+}
+
+func (matcher *canaryMatcher) maxMatchTokenLen() int {
+	if matcher == nil {
+		return 0
+	}
+	maxLen := 0
+	for _, secret := range matcher.secrets {
+		if len(secret.MatchToken) > maxLen {
+			maxLen = len(secret.MatchToken)
+		}
+	}
+	return maxLen
 }
 
 func (matcher *canaryMatcher) redact(value string) string {
@@ -541,16 +611,61 @@ func stringPtr(value string) *string {
 	return &value
 }
 
-func intPtr(value int) *int {
-	return &value
+func scanRequestBody(body io.Reader, matcher *canaryMatcher) (*string, canaryMatchSet, error) {
+	matches := make(canaryMatchSet)
+	if body == nil {
+		return nil, matches, nil
+	}
+	hasher := sha256.New()
+	buffer := make([]byte, requestBodyChunkSize)
+	readAny := false
+	tail := ""
+	maxTail := matcher.maxMatchTokenLen() - 1
+	if maxTail < 0 {
+		maxTail = 0
+	}
+
+	for {
+		// ref: go doc io.Reader on Go 1.26: process n > 0 before checking err.
+		n, err := body.Read(buffer)
+		if n > 0 {
+			readAny = true
+			chunk := buffer[:n]
+			// ref: go doc crypto/sha256.New and hash.Hash on Go 1.26.
+			_, _ = hasher.Write(chunk)
+			if matcher != nil && len(matcher.secrets) > 0 {
+				candidate := tail + string(chunk)
+				matcher.matchCandidate(candidate, matches)
+				tail = boundedSuffix(candidate, maxTail)
+			}
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, matches, err
+		}
+	}
+
+	if !readAny {
+		return nil, matches, nil
+	}
+	hashValue := hex.EncodeToString(hasher.Sum(nil))
+	return &hashValue, matches, nil
 }
 
-func bodyHash(body []byte) *string {
-	if len(body) == 0 {
-		return nil
+func boundedSuffix(value string, maxLen int) string {
+	if maxLen <= 0 || value == "" {
+		return ""
 	}
-	hash := sha256Hex(body)
-	return &hash
+	if len(value) <= maxLen {
+		return value
+	}
+	return value[len(value)-maxLen:]
+}
+
+func intPtr(value int) *int {
+	return &value
 }
 
 func sha256Hex(body []byte) string {

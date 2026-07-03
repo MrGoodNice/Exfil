@@ -47,9 +47,15 @@
   `go doc os.ReadFile`, `go doc encoding/json.Unmarshal`,
   `go doc strings.Contains`, `go doc strings.ReplaceAll`,
   and `go doc net/http Request.Header`.
+- Go streaming request-body API checked locally:
+  `go doc io.Reader`, `go doc io.EOF`, `go doc crypto/sha256.New`,
+  and `go doc hash.Hash`.
 - Docker F1 network pattern:
   `docker network create --help` on local Docker 29.6.0 confirms `--internal`
   and `--label`; `docker run --help` confirms `--network` and `--dns`.
 - Deliberately not borrowed:
   FakeNet Diverter and host traffic redirection. F1 uses only a Docker
   `--internal` network plus explicit container DNS.
+  Direct raw-IP destinations do not query DNS and therefore do not reach the
+  HTTP/TLS listener for L7 payload matching; they are covered by aya connect
+  metadata as attempted network-only egress.
