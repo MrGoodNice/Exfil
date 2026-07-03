@@ -231,7 +231,12 @@ public final class DownloadClassifier {
     private static String normalizeHost(String value) {
         String host = value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
         if (host.contains("://")) {
-            host = URI.create(host).getHost();
+            // Host/SNI is attacker-controlled; a malformed URL must not abort the run.
+            try {
+                host = URI.create(host).getHost();
+            } catch (IllegalArgumentException ex) {
+                // Keep the raw string; deterministic stripping below still yields a safe value.
+            }
         }
         if (host == null) {
             return "";
@@ -247,7 +252,16 @@ public final class DownloadClassifier {
         if (host.endsWith(".")) {
             host = host.substring(0, host.length() - 1);
         }
-        return IDN.toASCII(host);
+        return toAsciiOrRaw(host);
+    }
+
+    private static String toAsciiOrRaw(String host) {
+        // IDN.toASCII throws on hostile labels; raw lowercased host preserves entropy signals.
+        try {
+            return IDN.toASCII(host);
+        } catch (IllegalArgumentException ex) {
+            return host;
+        }
     }
 
     private static DomainList loadDomainList(String fileName) {
