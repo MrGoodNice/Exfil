@@ -77,8 +77,8 @@
 ## Ф1 — honeynet + сетевая правда (ПЕРВЫЙ по ценности) [Codex]
 
 - `sandbox/honeynet/`: DNS-sinkhole ([`fakenet/listeners/DNSListener.py:101`]), custom HTTP ([`HTTPListener.py:63`]), config-driven listeners ([`fakenet/fakenet.py:86`]). **НЕ берём** Diverter/iptables/`RedirectAllTraffic` ([`test/template.ini:43`]).
-- `mitmproxy`-аддон → `http.jsonl` `source=honeynet`, `upstream:false`: request hook ([`examples/addons/http-reply-from-proxy.py:6`]), dns hook ([`dns-simple.py:19`]), `SO_ORIGINAL_DST` ([`mitmproxy/platform/linux.py:5`]). caveat: `tcp_message` по `recv`-кускам ([`tcp-simple.py:1`]).
-- **CA-trust injection per-runtime**: система (`SSL_CERT_FILE`/`update-ca-certificates`), Node (`NODE_EXTRA_CA_CERTS`), Python (`REQUESTS_CA_BUNDLE`). pinning/QUIC → `opaque`.
+- `mitmproxy`/TLS-терминатор-паттерн → `http.jsonl` `source=honeynet`, `upstream:false`: request hook ([`examples/addons/http-reply-from-proxy.py:6`]), dns hook ([`dns-simple.py:19`]). `SO_ORIGINAL_DST` ([`mitmproxy/platform/linux.py:5`]) оставлен как референс transparent redirect, но текущий Ф1 его НЕ использует: доменные цели идут через DNS-sinkhole на listener IP. caveat: `tcp_message` по `recv`-кускам ([`tcp-simple.py:1`]).
+- **CA-trust injection per-runtime**: система (`SSL_CERT_FILE`/`update-ca-certificates`), Node (`NODE_EXTRA_CA_CERTS`), Python (`REQUESTS_CA_BUNDLE`). raw-IP/custom-route без DNS, pinning/QUIC → нет L7 payload visibility.
 - `flow_id` назначает honeynet.
 - Спец-тесты: HTTPS-POST curl/python/node расшифрован + канарейка сматчена; pinning → `opaque`; benign → синтетика; host-сеть не изменилась.
 
@@ -91,7 +91,7 @@
 ## Ф3 — Java-корреляция + отчёт [Codex]
 
 - `ManifestBuilder.java` — статика `guarddog`: capability+threat→risk ([`risk_engine.py:86`]); seed-правила (`capability-network-outbound.yar`, `threat-filesystem-read.yar`, `threat-runtime-environment-read.yar`); FP-в-комментах ([`analyzer.py:149`]). Static-score = **feature**, НЕ вердикт.
-- `EventCorrelator.java` — **склейка honeynet↔aya_connect** по `run_id + original dst + proto` в окне (`SO_ORIGINAL_DST`), связь через `flow_id` → **ОДНО** egress с `pid + host/path + canary_match`. Несматченные: aya без honeynet → network-only; honeynet без aya → `pid:null`.
+- `EventCorrelator.java` — **склейка honeynet↔aya_connect** по `run_id + dst_ip:dst_port + proto` в окне для DNS-steered listener-потока, связь через `flow_id` → **ОДНО** egress с `pid + host/path + canary_match`. Несматченные: aya без honeynet → network-only attempted/suspicious (в т.ч. raw-IP); honeynet без aya → `pid:null`.
 - `DownloadClassifier.java` — legit vs suspicious; `attempted` vs `observed`.
 - `ReportRenderer.java` — CLI+HTML; цепочка `open(canary_rsa)[pid X] → exec curl → POST evil.com (канарейка в теле)`; честные оговорки.
 - Спец-тесты: цепочка собрана; **ровно одно** egress после джойна; legit/suspicious; снапшот HTML/CLI.
@@ -106,6 +106,6 @@
 
 - `bin/scan.sh <git-url>` — оркестратор (honeynet по умолчанию); smoke на benign. `bin/cleanup.sh` — идемпотентный.
 - **Fail-closed:** контейнер не достаёт публичный+Tailscale IP; host SSH жив; cleanup чист.
-- TLS: canary матчится в теле где CA доверен; pinning/QUIC честно `opaque`.
+- TLS: canary матчится в теле где CA доверен и трафик попал в DNS-steered listener; raw-IP/custom-route без DNS, pinning/QUIC честно не дают payload visibility.
 - aya видит `openat/execve` гостя (подтверждение, что hardened Docker — верный выбор, не gVisor).
 - Отчёт человеко-читаем, решает человек.

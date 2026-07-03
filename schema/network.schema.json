@@ -15,7 +15,7 @@
     "pid": { "type": ["integer", "null"] },
     "src_ip": { "type": ["string", "null"] },
     "src_port": { "type": ["integer", "null"] },
-    "dst_ip": { "type": "string", "description": "оригинальный dst (для aya — аргумент connect(); для honeynet — восстановленный через SO_ORIGINAL_DST)" },
+    "dst_ip": { "type": "string", "description": "для aya_connect — dst из аргумента connect(); для текущего honeynet DNS-steering — IP локального listener, а не восстановленный original dst" },
     "dst_port": { "type": "integer" },
     "proto": { "enum": ["tcp", "udp", "other"] },
     "retval": { "type": ["integer", "null"], "description": "результат connect() (метаданные, напр. ECONNREFUSED). НЕ используется как сигнал блока/taint." },

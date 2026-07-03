@@ -12,11 +12,13 @@ Java заявляет (статика) → детонация проверяет
 
 - **Ф0** — фундамент: скелет (структура + 5 схем), Gradle+Cargo-скелеты, `run-sandboxed.sh`
   (hardened Docker+honeynet, fail-closed), per-run канарейки, 3 сэмпла, первый commit.
-- **Ф1** — honeynet + сетевая правда: FakeNet/INetSim + mitmproxy(+CA), весь egress завёрнут →
-  `network/dns/http.jsonl`. CA-injection per-runtime; pinning/QUIC → `opaque`.
+- **Ф1** — honeynet + сетевая правда: FakeNet/INetSim-паттерн + TLS-терминатор(+CA),
+  DNS-steered доменные цели → `network/dns/http.jsonl`. CA-injection per-runtime; raw-IP,
+  pinning/QUIC/custom TLS → без L7 payload visibility.
 - **Ф2** — тонкий aya-сенсор: `openat`(canary)+`execve`+`connect`-metadata (строго metadata,
   без taint/block), scoped по cgroup → `files/proc/network.jsonl`.
-- **Ф3** — Java-корреляция + отчёт: склейка honeynet↔aya_connect (`SO_ORIGINAL_DST`), сверка с
+- **Ф3** — Java-корреляция + отчёт: склейка honeynet↔aya_connect по фактическому dst
+  DNS-steered listener-потока, network-only raw-IP остаётся attempted/suspicious, сверка с
   manifest, severity, `attempted` vs `observed`, CLI+HTML.
 - **Ф4** — полировка.
 

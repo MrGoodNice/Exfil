@@ -81,6 +81,26 @@ final class EventCorrelatorTest {
     }
 
     @Test
+    void rawIpAfterCanaryReadKeepsAttemptEvidenceWithoutPayloadConfirmation() throws Exception {
+        writeRawIpAttemptScenario(tempDir, "run-raw-attempt");
+
+        CorrelatedRun run = onlyRun(correlate(tempDir));
+
+        assertEquals(1, run.egressEvents().size());
+        EgressEvent egress = run.egressEvents().getFirst();
+        assertTrue(egress.networkOnly());
+        assertEquals("198.51.100.10", egress.dstIp());
+        assertTrue(egress.canaryMatch().isEmpty(), "raw-IP payload is not L7-visible in DNS-steered honeynet");
+        assertTrue(run.matchedCanaryIds().isEmpty(), "attempted raw-IP egress must not be exfil-confirmed");
+        assertEquals(1, run.evidenceChains().size());
+        EvidenceChain chain = run.evidenceChains().getFirst();
+        assertEquals(300, chain.filePid());
+        assertEquals(301, chain.egressPid());
+        assertEquals(List.of(300, 301), chain.processPath());
+        assertTrue(chain.canaryMatch().isEmpty());
+    }
+
+    @Test
     void unmatchedHoneynetFlowIsKeptWithNullPid() throws Exception {
         Files.writeString(
                 tempDir.resolve("network.jsonl"),
@@ -195,6 +215,27 @@ final class EventCorrelatorTest {
                 {"ts":"2026-07-02T09:59:59Z","run_id":"%s","sample_id":"sample-a","pid":200,"ppid":1,"tgid":200,"comm":"sh","exe":"/bin/sh","argv_hash":"hash200","event":"execve","container_id":"ctr-a","cgroup_id":"42"}
                 {"ts":"2026-07-02T10:00:01Z","run_id":"%s","sample_id":"sample-a","pid":201,"ppid":200,"tgid":201,"comm":"curl","exe":"/usr/bin/curl","argv_hash":"hash201","event":"execve","container_id":"ctr-a","cgroup_id":"42"}
                 """.formatted(runId, runId));
+        Files.writeString(dir.resolve("dns.jsonl"), "");
+    }
+
+    private static void writeRawIpAttemptScenario(Path dir, String runId) throws Exception {
+        Files.writeString(
+                dir.resolve("network.jsonl"),
+                """
+                {"ts":"2026-07-02T10:00:03Z","run_id":"%s","sample_id":"sample-a","source":"aya_connect","flow_id":null,"pid":301,"src_ip":null,"src_port":null,"dst_ip":"198.51.100.10","dst_port":80,"proto":"tcp","retval":-101,"container_id":"ctr-a","cgroup_id":"42"}
+                """.formatted(runId));
+        Files.writeString(
+                dir.resolve("files.jsonl"),
+                """
+                {"ts":"2026-07-02T10:00:00Z","run_id":"%s","sample_id":"sample-a","pid":300,"tgid":300,"comm":"sh","path":"/canary/canary_rsa","is_canary":true,"container_id":"ctr-a","cgroup_id":"42"}
+                """.formatted(runId));
+        Files.writeString(
+                dir.resolve("proc.jsonl"),
+                """
+                {"ts":"2026-07-02T09:59:59Z","run_id":"%s","sample_id":"sample-a","pid":300,"ppid":1,"tgid":300,"comm":"sh","exe":"/bin/sh","argv_hash":"hash300","event":"execve","container_id":"ctr-a","cgroup_id":"42"}
+                {"ts":"2026-07-02T10:00:02Z","run_id":"%s","sample_id":"sample-a","pid":301,"ppid":300,"tgid":301,"comm":"wget","exe":"/bin/wget","argv_hash":"hash301","event":"execve","container_id":"ctr-a","cgroup_id":"42"}
+                """.formatted(runId, runId));
+        Files.writeString(dir.resolve("http.jsonl"), "");
         Files.writeString(dir.resolve("dns.jsonl"), "");
     }
 }

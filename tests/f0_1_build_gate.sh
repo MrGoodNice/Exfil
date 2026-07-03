@@ -21,5 +21,8 @@ for path in "${required_files[@]}"; do
   fi
 done
 
-cargo build --manifest-path "$repo_root/rust-observer/Cargo.toml"
+(
+  cd "$repo_root/rust-observer"
+  SNOOP_SKIP_EBPF_BUILD=1 cargo build --package snoop-common --package snoop
+)
 "$repo_root/java-analyzer/gradlew" --project-dir "$repo_root/java-analyzer" build

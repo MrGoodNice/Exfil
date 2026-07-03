@@ -271,6 +271,15 @@ def main():
 
     require_nullable_string(require_property(network, "flow_id"), "network", "flow_id")
     require_nullable_string(require_property(http, "flow_id"), "http", "flow_id")
+    network_dst_description = require_property(network, "dst_ip").get("description", "").lower()
+    if "dns" not in network_dst_description or "listener" not in network_dst_description:
+        raise AssertionError(
+            "network.dst_ip description must state the honeynet DNS-steering listener-IP limit"
+        )
+    if "so_original_dst" in network_dst_description:
+        raise AssertionError(
+            "network.dst_ip description must not claim SO_ORIGINAL_DST for the current honeynet"
+        )
 
     http_canary = require_property(http, "canary_match")
     require_string_array(http_canary, "http", "canary_match")

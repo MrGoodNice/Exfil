@@ -168,7 +168,7 @@ public final class EventCorrelator {
                 continue;
             }
             for (EgressEvent event : egress) {
-                if (event.pid() == null || event.canaryMatch().isEmpty()) {
+                if (event.pid() == null || instant(event.ts()).isBefore(instant(file.ts()))) {
                     continue;
                 }
                 List<Integer> processPath = processPath(file.pid(), event.pid(), parentByPid);
