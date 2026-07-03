@@ -1,0 +1,2 @@
+# ref: /home/mrg/Desktop/exfil-step-a-refs/guarddog/guarddog/analyzer/sourcecode/threat-network-outbound-shady-links.yar:15
+bit.ly

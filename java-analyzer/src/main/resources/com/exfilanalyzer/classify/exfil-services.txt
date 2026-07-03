@@ -1,0 +1,12 @@
+# ref: /home/mrg/Desktop/exfil-step-a-refs/guarddog/guarddog/analyzer/sourcecode/threat-network-outbound-shady-links.yar:27
+discord.com/api/webhooks
+transfer.sh
+filetransfer.io
+sendspace.com
+backblazeb2.com
+paste.ee
+pastebin.com
+hastebin.com
+ghostbin.site
+api.telegram.org
+rentry.co

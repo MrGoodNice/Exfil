@@ -1,0 +1,26 @@
+# ref: /home/mrg/Desktop/exfil-step-a-refs/guarddog/guarddog/analyzer/sourcecode/threat-network-outbound-shady-links.yar:20
+appdomain.cloud
+ngrok.io
+termbin.com
+localhost.run
+webhook.site
+webhook.cool
+oastify.com
+burpcollaborator.me
+burpcollaborator.net
+trycloudflare.com
+# ref: /home/mrg/Desktop/exfil-step-a-refs/guarddog/guarddog/analyzer/sourcecode/threat-network-outbound-shady-links.yar:23
+oast.pro
+oast.live
+oast.site
+oast.online
+oast.fun
+oast.me
+ply.gg
+pipedream.net
+dnslog.cn
+webhook-test.com
+typedwebhook.tools
+beeceptor.com
+ngrok-free.app
+ngrok-free.dev

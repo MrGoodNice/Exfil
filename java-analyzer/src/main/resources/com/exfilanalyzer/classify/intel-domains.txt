@@ -1,0 +1,7 @@
+# ref: /home/mrg/Desktop/exfil-step-a-refs/guarddog/guarddog/analyzer/sourcecode/threat-network-outbound-shady-links.yar:30
+ipinfo.io
+checkip.dyndns.org
+ip.me
+jsonip.com
+ipify.org
+ifconfig.me
