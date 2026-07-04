@@ -160,6 +160,16 @@ final class DownloadClassifierTest {
     }
 
     @Test
+    void pureAlphaMediumLengthLabelDocumentsHighEntropyBlindSpot() {
+        EgressEvent egress = egress("203.0.113.20", "abcdefghijklmnoprstu.example.test", "flow-alpha", List.of());
+        ClassifiedEgress classified = only(classifier.classify(run(egress), httpWithoutBody(egress), List.of()));
+
+        assertEquals(Disposition.LEGIT_LOOKING, classified.disposition());
+        assertTrue(classified.reasons().contains("no_suspicious_signals"));
+        assertTrue(!classified.reasons().contains("high_entropy_domain"));
+    }
+
+    @Test
     void constructedDnsSubdomainWithoutCanaryIsSuspiciousNotConfirmed() {
         EgressEvent egress = egress("203.0.113.19", "aaaabbbbccccddddeeeeffff.example.test", "flow-dns", List.of());
         DnsEvent dns = new DnsEvent(

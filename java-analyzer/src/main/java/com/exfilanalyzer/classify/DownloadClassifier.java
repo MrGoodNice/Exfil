@@ -185,6 +185,9 @@ public final class DownloadClassifier {
     }
 
     private static boolean highEntropyLabel(String label) {
+        // Intentional FP guard: require >=16 chars and at least one digit. Pure-alpha
+        // 16-23 char labels are a known blind spot; >=24 char labels are handled by
+        // looksLikeDnsSubdomainExfil before this helper.
         if (label.length() < 16 || label.chars().noneMatch(Character::isDigit)) {
             return false;
         }
