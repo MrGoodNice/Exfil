@@ -11,7 +11,7 @@ public record ProcEvent(
         int tgid,
         String comm,
         String exe,
-        @JsonProperty("argv_hash") String argvHash,
+        @JsonProperty("exe_hash") String exeHash,
         String event,
         @JsonProperty("container_id") String containerId,
         @JsonProperty("cgroup_id") String cgroupId) {}

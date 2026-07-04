@@ -77,7 +77,7 @@ final class JsonlReaderTest {
         Files.writeString(
                 tempDir.resolve("proc.jsonl"),
                 """
-                {"ts":"2026-07-02T09:59:59Z","run_id":"run-a","sample_id":"sample-a","pid":100,"ppid":1,"tgid":100,"comm":"cat","exe":"/bin/cat","argv_hash":"hash100","event":"execve","container_id":"ctr-a","cgroup_id":"42"}
+                {"ts":"2026-07-02T09:59:59Z","run_id":"run-a","sample_id":"sample-a","pid":100,"ppid":1,"tgid":100,"comm":"cat","exe":"/bin/cat","exe_hash":"hash100","event":"execve","container_id":"ctr-a","cgroup_id":"42"}
                 """);
 
         RunEvents events = new JsonlReader().readRun(tempDir);

@@ -340,7 +340,7 @@ pub fn render_proc_event(event: &SensorEvent, config: &SensorConfig) -> Value {
     } else {
         "execve"
     };
-    let argv_hash = if event.kind == EVENT_KIND_EXECVE {
+    let exe_hash = if event.kind == EVENT_KIND_EXECVE {
         exe_value.as_deref().map(stable_hash_hex)
     } else {
         None
@@ -354,7 +354,7 @@ pub fn render_proc_event(event: &SensorEvent, config: &SensorConfig) -> Value {
         "tgid": event.tgid,
         "comm": bytes_to_string(event.comm_bytes()),
         "exe": exe_value,
-        "argv_hash": argv_hash,
+        "exe_hash": exe_hash,
         "event": event_name,
         "container_id": config.container_id,
         "cgroup_id": cgroup_json(event.cgroup_id),
@@ -585,7 +585,8 @@ pub mod tests {
         assert_eq!(value["comm"], "curl");
         assert_eq!(value["exe"], "/bin/wget");
         assert_eq!(value["event"], "execve");
-        assert!(value["argv_hash"].as_str().unwrap().len() == 16);
+        assert!(value["exe_hash"].as_str().unwrap().len() == 16);
+        assert!(value.get("argv_hash").is_none());
         assert_eq!(value["container_id"], "container-test");
         assert_eq!(value["cgroup_id"], "42");
     }

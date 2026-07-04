@@ -231,7 +231,7 @@ final class EventCorrelatorTest {
         Files.writeString(
                 dir.resolve("proc.jsonl"),
                 """
-                {"ts":"2026-07-02T09:59:59Z","run_id":"%s","sample_id":"sample-a","pid":100,"ppid":1,"tgid":100,"comm":"curl","exe":"/usr/bin/curl","argv_hash":"hash100","event":"execve","container_id":"ctr-a","cgroup_id":"42"}
+                {"ts":"2026-07-02T09:59:59Z","run_id":"%s","sample_id":"sample-a","pid":100,"ppid":1,"tgid":100,"comm":"curl","exe":"/usr/bin/curl","exe_hash":"hash100","event":"execve","container_id":"ctr-a","cgroup_id":"42"}
                 """.formatted(runId));
         Files.writeString(dir.resolve("dns.jsonl"), "");
     }
@@ -256,8 +256,8 @@ final class EventCorrelatorTest {
         Files.writeString(
                 dir.resolve("proc.jsonl"),
                 """
-                {"ts":"2026-07-02T09:59:59Z","run_id":"%s","sample_id":"sample-a","pid":200,"ppid":1,"tgid":200,"comm":"sh","exe":"/bin/sh","argv_hash":"hash200","event":"execve","container_id":"ctr-a","cgroup_id":"42"}
-                {"ts":"2026-07-02T10:00:01Z","run_id":"%s","sample_id":"sample-a","pid":201,"ppid":200,"tgid":201,"comm":"curl","exe":"/usr/bin/curl","argv_hash":"hash201","event":"execve","container_id":"ctr-a","cgroup_id":"42"}
+                {"ts":"2026-07-02T09:59:59Z","run_id":"%s","sample_id":"sample-a","pid":200,"ppid":1,"tgid":200,"comm":"sh","exe":"/bin/sh","exe_hash":"hash200","event":"execve","container_id":"ctr-a","cgroup_id":"42"}
+                {"ts":"2026-07-02T10:00:01Z","run_id":"%s","sample_id":"sample-a","pid":201,"ppid":200,"tgid":201,"comm":"curl","exe":"/usr/bin/curl","exe_hash":"hash201","event":"execve","container_id":"ctr-a","cgroup_id":"42"}
                 """.formatted(runId, runId));
         Files.writeString(dir.resolve("dns.jsonl"), "");
     }
@@ -276,8 +276,8 @@ final class EventCorrelatorTest {
         Files.writeString(
                 dir.resolve("proc.jsonl"),
                 """
-                {"ts":"2026-07-02T09:59:59Z","run_id":"%s","sample_id":"sample-a","pid":300,"ppid":1,"tgid":300,"comm":"sh","exe":"/bin/sh","argv_hash":"hash300","event":"execve","container_id":"ctr-a","cgroup_id":"42"}
-                {"ts":"2026-07-02T10:00:02Z","run_id":"%s","sample_id":"sample-a","pid":301,"ppid":300,"tgid":301,"comm":"wget","exe":"/bin/wget","argv_hash":"hash301","event":"execve","container_id":"ctr-a","cgroup_id":"42"}
+                {"ts":"2026-07-02T09:59:59Z","run_id":"%s","sample_id":"sample-a","pid":300,"ppid":1,"tgid":300,"comm":"sh","exe":"/bin/sh","exe_hash":"hash300","event":"execve","container_id":"ctr-a","cgroup_id":"42"}
+                {"ts":"2026-07-02T10:00:02Z","run_id":"%s","sample_id":"sample-a","pid":301,"ppid":300,"tgid":301,"comm":"wget","exe":"/bin/wget","exe_hash":"hash301","event":"execve","container_id":"ctr-a","cgroup_id":"42"}
                 """.formatted(runId, runId));
         Files.writeString(dir.resolve("http.jsonl"), "");
         Files.writeString(dir.resolve("dns.jsonl"), "");

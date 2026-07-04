@@ -132,7 +132,7 @@ def valid_instances():
             "tgid": 4242,
             "comm": "curl",
             "exe": "/usr/bin/curl",
-            "argv_hash": "b" * 64,
+            "exe_hash": "b" * 64,
             "event": "execve",
             "container_id": "container-001",
             "cgroup_id": "123456789",

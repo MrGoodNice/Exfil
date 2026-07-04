@@ -15,7 +15,7 @@
     "tgid": { "type": "integer" },
     "comm": { "type": "string" },
     "exe": { "type": ["string", "null"] },
-    "argv_hash": { "type": ["string", "null"] },
+    "exe_hash": { "type": ["string", "null"] },
     "event": { "enum": ["execve", "exit"] },
     "container_id": { "type": ["string", "null"] },
     "cgroup_id": { "type": ["string", "null"] }
