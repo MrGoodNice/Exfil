@@ -107,11 +107,6 @@ type trackingConn struct {
 	logFailedHandshake bool
 }
 
-type trackingTLSConn struct {
-	*tls.Conn
-	flow *connectionFlow
-}
-
 type canaryCatalog struct {
 	Secrets []canarySecret `json:"secrets"`
 }
@@ -485,7 +480,9 @@ func (listener *trackingTLSListener) Accept() (net.Conn, error) {
 		return nil, fmt.Errorf("tracking TLS listener accepted unexpected connection type %T", conn)
 	}
 	// ref: go doc crypto/tls Server on Go 1.26.
-	return &trackingTLSConn{Conn: tls.Server(tracked, listener.config), flow: tracked.flow}, nil
+	// Return the bare *tls.Conn so net/http can run HandshakeContext(connCtx);
+	// connContext recovers the flow through tls.Conn.NetConn().
+	return tls.Server(tracked, listener.config), nil
 }
 
 func (conn *trackingConn) Close() error {
@@ -503,9 +500,12 @@ func connContext(ctx context.Context, conn net.Conn) context.Context {
 		// ref: go doc context.WithValue on Go 1.26.
 		return context.WithValue(ctx, flowContextKey{}, tracked.flow)
 	}
-	if tracked, ok := conn.(*trackingTLSConn); ok {
-		// ref: go doc context.WithValue on Go 1.26.
-		return context.WithValue(ctx, flowContextKey{}, tracked.flow)
+	if tlsConn, ok := conn.(*tls.Conn); ok {
+		// ref: go doc crypto/tls Conn.NetConn on Go 1.26.
+		if tracked, ok := tlsConn.NetConn().(*trackingConn); ok {
+			// ref: go doc context.WithValue on Go 1.26.
+			return context.WithValue(ctx, flowContextKey{}, tracked.flow)
+		}
 	}
 	return ctx
 }

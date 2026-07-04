@@ -41,6 +41,7 @@
   `go doc net Conn.RemoteAddr`, `go doc net Conn.LocalAddr`,
   `go doc net.Listen`, `go doc net/http Server.Serve`,
   `go doc net/http Server.ServeTLS`, `go doc crypto/tls Server`,
+  `go doc crypto/tls Conn.NetConn`,
   `go doc crypto/tls ClientHelloInfo.Context`, `go doc net.SplitHostPort`,
   and `go doc strconv.Atoi`.
 - Go canary matching API checked locally:
