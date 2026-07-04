@@ -35,6 +35,11 @@ This slice uses the kernel helper `bpf_get_current_cgroup_id()` for the JSON `cg
 and userspace filtering. Runtime review should verify that helper value scopes the target cgroup
 correctly on kernel 6.18.
 
+F2.1 ppid note: eBPF currently writes `ppid=0`; userspace fills it from `/proc/{pid}/stat`
+after draining the ring buffer. If the process exits before that read, the fallback returns
+`None` and the event keeps `ppid=0`. Porting a CO-RE `task_struct -> real_parent` walk is
+intentionally deferred because that path is kernel-version-sensitive.
+
 ## F2.2
 
 - `/home/mrg/Desktop/exfil-step-a-refs/kunai/kunai-ebpf/src/probes/connect.rs:15` — kprobe on `__sys_connect` for connect entry.

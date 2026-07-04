@@ -330,6 +330,9 @@ pub fn render_proc_event(event: &SensorEvent, config: &SensorConfig) -> Value {
     let ppid = if event.ppid != 0 {
         event.ppid
     } else {
+        // eBPF leaves ppid unset in this slice; userspace fills it from /proc after the
+        // ring-buffer read. If the process exits before this drain, /proc is gone and
+        // ppid stays 0. Full CO-RE real_parent capture is deliberately not ported here.
         proc_ppid(event.pid).unwrap_or(0)
     };
     let event_name = if event.kind == EVENT_KIND_EXIT {
