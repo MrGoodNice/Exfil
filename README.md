@@ -30,6 +30,11 @@ egress, cert pinning, QUIC и custom TLS не дают L7 payload-видимос
 видимы через aya `connect` metadata как suspicious/attempted network-only, но без
 `canary_match` это не `EXFIL_CONFIRMED`.
 
+Матч канарейки тоже дословный: honeynet/DNS ищут per-run токен как подстроку в payload,
+заголовках и DNS-лейблах. Если секрет уходит закодированным, сжатым или зашифрованным
+(base64, gzip, TLS-внутри-TLS), сырой токен не встретится и HTTP/DNS `canary_match` останется
+пустым. Поэтому `LEGIT_LOOKING` означает «явных сигналов не видно», а не «точно чисто».
+
 **Хост неприкосновенен:** изоляция строго поконтейнерно; сеть сервера (SSH/Tailscale) не трогаем.
 
 ## Контракты (`schema/`)
