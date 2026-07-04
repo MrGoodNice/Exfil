@@ -124,6 +124,50 @@ final class EventCorrelatorTest {
     }
 
     @Test
+    void egressOutputIsOrderedByParsedInstantNotTimestampString() throws Exception {
+        Files.writeString(
+                tempDir.resolve("network.jsonl"),
+                """
+                {"ts":"2026-07-02T10:00:02.500Z","run_id":"run-order","sample_id":"sample-a","source":"aya_connect","flow_id":null,"pid":502,"src_ip":null,"src_port":null,"dst_ip":"203.0.113.2","dst_port":443,"proto":"tcp","retval":-101,"container_id":"ctr-a","cgroup_id":"42"}
+                {"ts":"2026-07-02T10:00:02Z","run_id":"run-order","sample_id":"sample-a","source":"aya_connect","flow_id":null,"pid":501,"src_ip":null,"src_port":null,"dst_ip":"203.0.113.1","dst_port":443,"proto":"tcp","retval":-101,"container_id":"ctr-a","cgroup_id":"42"}
+                """);
+
+        CorrelatedRun run = onlyRun(correlate(tempDir));
+
+        assertEquals(2, run.egressEvents().size());
+        assertEquals("2026-07-02T10:00:02Z", run.egressEvents().get(0).ts());
+        assertEquals("2026-07-02T10:00:02.500Z", run.egressEvents().get(1).ts());
+        assertEquals(501, run.egressEvents().get(0).pid());
+        assertEquals(502, run.egressEvents().get(1).pid());
+    }
+
+    @Test
+    void bestAyaMatchUsesParsedInstantForTieBreak() throws Exception {
+        Files.writeString(
+                tempDir.resolve("network.jsonl"),
+                """
+                {"ts":"2026-07-02T10:00:02Z","run_id":"run-best","sample_id":"sample-a","source":"aya_connect","flow_id":null,"pid":601,"src_ip":null,"src_port":null,"dst_ip":"203.0.113.44","dst_port":443,"proto":"tcp","retval":-101,"container_id":"ctr-a","cgroup_id":"42"}
+                {"ts":"2026-07-02T10:00:02.500Z","run_id":"run-best","sample_id":"sample-a","source":"aya_connect","flow_id":null,"pid":602,"src_ip":null,"src_port":null,"dst_ip":"203.0.113.44","dst_port":443,"proto":"tcp","retval":-101,"container_id":"ctr-a","cgroup_id":"42"}
+                {"ts":"2026-07-02T10:00:03Z","run_id":"run-best","sample_id":"sample-a","source":"honeynet","flow_id":"flow-best","pid":null,"src_ip":"172.18.0.2","src_port":44100,"dst_ip":"203.0.113.44","dst_port":443,"proto":"tcp","retval":null,"container_id":"ctr-a","cgroup_id":"42"}
+                """);
+        Files.writeString(
+                tempDir.resolve("http.jsonl"),
+                """
+                {"ts":"2026-07-02T10:00:03Z","run_id":"run-best","sample_id":"sample-a","flow_id":"flow-best","method":"GET","host":"best.example.test","path":"/stage","tls":true,"opaque_reason":null,"canary_match":[],"request_body_sha256":null,"response_body_sha256":"abc","upstream":false}
+                """);
+
+        CorrelatedRun run = onlyRun(correlate(tempDir));
+
+        assertEquals(2, run.egressEvents().size());
+        EgressEvent joined = run.egressEvents().stream()
+                .filter(EgressEvent::joined)
+                .findFirst()
+                .orElseThrow();
+        assertEquals(602, joined.pid());
+        assertEquals("best.example.test", joined.host());
+    }
+
+    @Test
     void eventsAreGroupedByRunIdBeforeJoining() throws Exception {
         Files.writeString(
                 tempDir.resolve("network.jsonl"),

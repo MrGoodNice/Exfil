@@ -35,11 +35,11 @@ public final class EventCorrelator {
     private CorrelatedRun correlateRun(String runId, RunEvents events) {
         List<NetworkEvent> network = events.network().stream()
                 .filter(event -> runId.equals(event.runId()))
-                .sorted(Comparator.comparing(NetworkEvent::ts))
+                .sorted(Comparator.comparing((NetworkEvent event) -> instant(event.ts())))
                 .toList();
         List<HttpEvent> http = events.http().stream()
                 .filter(event -> runId.equals(event.runId()))
-                .sorted(Comparator.comparing(HttpEvent::ts))
+                .sorted(Comparator.comparing((HttpEvent event) -> instant(event.ts())))
                 .toList();
         List<FileEvent> files = events.files().stream()
                 .filter(event -> runId.equals(event.runId()))
@@ -82,7 +82,7 @@ public final class EventCorrelator {
             }
         }
 
-        egress.sort(Comparator.comparing(EgressEvent::ts));
+        egress.sort(Comparator.comparing((EgressEvent event) -> instant(event.ts())));
         Set<String> touchedCanaries = touchedCanaries(files);
         Set<String> matchedCanaries = matchedCanaries(egress);
         List<EvidenceChain> chains = evidenceChains(runId, files, proc, egress);
@@ -100,7 +100,7 @@ public final class EventCorrelator {
                 .filter(event -> Duration.between(instant(event.ts()), instant(honeynet.ts()))
                         .compareTo(JOIN_WINDOW)
                         <= 0)
-                .max(Comparator.comparing(NetworkEvent::ts));
+                .max(Comparator.comparing((NetworkEvent event) -> instant(event.ts())));
     }
 
     private static EgressEvent fromNetworkPair(
